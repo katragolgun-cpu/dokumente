@@ -845,6 +845,7 @@ function drawScanEdit(){
     <div class="sheet-head"><h2>Ränder prüfen</h2><div class="btnrow"><button type="button" class="btn" data-act="scanback">Zurück</button><button type="button" class="btn primary" data-act="scanok">Übernehmen</button></div></div>
     <p class="status" style="margin:10px 0 0">Zieh die Ecken auf die Ecken des Blatts.</p>
     <div class="scanwrap"><canvas id="scanCv"></canvas></div>
+    <div class="chips" style="margin-top:10px" aria-label="Bilddarstellung">${[["color","Farbe aufgehellt"],["orig","Original"],["bw","Schwarz-Weiß"]].map(([k,l])=>`<button type="button" class="chip" data-act="scanmode" data-mode="${k}" aria-pressed="${(SC.mode||"color")===k}">${l}</button>`).join("")}</div>
     <div class="btnrow"><button type="button" class="btn" data-act="scanfull">Ganzes Foto verwenden</button><button type="button" class="btn" data-act="scanauto">Ränder neu suchen</button></div>
   </div></div>`;
   const cv=$("#scanCv"),maxW=Math.min(window.innerWidth-40,700),maxH=window.innerHeight*0.6;
@@ -864,13 +865,15 @@ function drawScanEdit(){
     if(act==="scanback"){SC.cur=null;return drawScanStart()}
     if(act==="scanfull"){cur.quad=[[0,0],[cur.w,0],[cur.w,cur.h],[0,cur.h]];return paint()}
     if(act==="scanauto"){cur.quad=detectQuad(cur.src);return paint()}
+    if(act==="scanmode"){SC.mode=b.dataset.mode;$("#scrim").querySelectorAll("[data-act=scanmode]").forEach(x=>x.setAttribute("aria-pressed",x===b));return}
     if(act==="scanok"){b.disabled=true;b.textContent="Wird aufbereitet …";await new Promise(r=>setTimeout(r,30));
-      const out=enhanceScan(warpQuad(cur.src,cur.quad));
-      // volle Auflösung für die Texterkennung, verkleinert für die PDF
-      const ocrBlob=await new Promise(r=>out.toBlob(r,"image/jpeg",0.9));
+      const warped=warpQuad(cur.src,cur.quad),mode=SC.mode||"color";
+      // PDF-Bild nach gewähltem Modus; Texterkennung immer mit S/W-Aufbereitung (liest am besten)
+      const out=mode==="bw"?warped:mode==="orig"?cloneCanvas(warped):brightenColor(cloneCanvas(warped));
+      const ocrBlob=await new Promise(r=>enhanceScan(warped).toBlob(r,"image/jpeg",0.9));
       const ps=Math.min(1,2200/Math.max(out.width,out.height)),pw=Math.round(out.width*ps),ph=Math.round(out.height*ps);
       const small=document.createElement("canvas");small.width=pw;small.height=ph;small.getContext("2d").drawImage(out,0,0,pw,ph);
-      const blob=await new Promise(r=>small.toBlob(r,"image/jpeg",0.82));
+      const blob=await new Promise(r=>small.toBlob(r,"image/jpeg",0.88));
       SC.pages.push({blob,ocrBlob,w:pw,h:ph,url:URL.createObjectURL(blob)});SC.cur=null;drawScanStart()}
   });
 }
@@ -890,6 +893,18 @@ function warpQuad(src,quad){
     const xi=X|0,yi=Y|0,fx=X-xi,fy=Y-yi,p=(yi*sw+xi)*4,q=p+sw*4,t=(j*W+i)*4;
     for(let ch=0;ch<3;ch++){o[t+ch]=(sd[p+ch]*(1-fx)+sd[p+4+ch]*fx)*(1-fy)+(sd[q+ch]*(1-fx)+sd[q+4+ch]*fx)*fy}o[t+3]=255}}
   oc.putImageData(od,0,0);return out;
+}
+function cloneCanvas(cv){const c=document.createElement("canvas");c.width=cv.width;c.height=cv.height;c.getContext("2d").drawImage(cv,0,0);return c}
+// Farbe aufgehellt: Weiß- und Schwarzpunkt aus der Helligkeitsverteilung (Perzentile), Farben und Grauflächen bleiben erhalten
+function brightenColor(cv){
+  const w=cv.width,h=cv.height,ctx=cv.getContext("2d",{willReadFrequently:true}),a=ctx.getImageData(0,0,w,h),d=a.data;
+  const hist=new Uint32Array(256);let n=0;
+  for(let i=0;i<d.length;i+=16){hist[(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])|0]++;n++}
+  const pct=p=>{let acc=0;for(let v=0;v<256;v++){acc+=hist[v];if(acc>=n*p)return v}return 255};
+  const lo=Math.min(pct(0.01),60),hi=Math.max(pct(0.90),lo+60),k=255/(hi-lo),lut=new Uint8ClampedArray(256);
+  for(let v=0;v<256;v++){const x=Math.max(0,Math.min(1,(v-lo)*k/255));lut[v]=Math.round(255*Math.pow(x,0.9))}
+  for(let i=0;i<d.length;i+=4){d[i]=lut[d[i]];d[i+1]=lut[d[i+1]];d[i+2]=lut[d[i+2]]}
+  ctx.putImageData(a,0,0);return cv;
 }
 // Scan-Look: Graustufen, Licht ausgleichen, Papier weiß, Schrift kräftig
 function enhanceScan(cv){
