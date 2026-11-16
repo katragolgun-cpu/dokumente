@@ -147,6 +147,7 @@ details summary{cursor:pointer}
     <button class="iconbtn" id="btnSettings" type="button" aria-label="Einstellungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="dot" id="settingsDot" hidden></span></button>
   </header>
   <div class="search" role="search"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input type="text" inputmode="search" id="q" placeholder="Suchen: Absender, Schlagwort, Text, Aktenzeichen" aria-label="Dokumente durchsuchen" autocomplete="off" enterkeyhint="search"><button type="button" id="qClear" aria-label="Suche leeren" hidden>×</button></div>
+  <div id="importBar" class="hint" hidden></div>
   <section id="dueBox" class="due-box" hidden></section>
   <nav class="chips" id="statusChips" aria-label="Status"></nav>
   <nav class="chips" id="catChips" aria-label="Kategorien"></nav>
@@ -409,6 +410,7 @@ function applyZoom(){
   const pc=$("#vPct");if(pc)pc.textContent=Math.round(V.zoom*100)+" %";
 }
 async function openViewer(src){
+  if(src.doc&&!src.doc.fileId&&!src.doc.driveId&&src.doc.url){window.open(src.doc.url,"_blank");return}
   V.zoom=1;V.open=true;
   $("#viewerHost").innerHTML=`<div class="vw" role="dialog" aria-modal="true" aria-label="Großansicht">
     <div class="vbar"><button type="button" class="btn" data-v="close">Schließen</button>
@@ -581,6 +583,7 @@ async function openView(id){
     <div class="sec"><h3>Status</h3><div class="seg">${Object.entries(STATUS).map(([k,l])=>`<button type="button" class="${k}" data-act="st" data-s="${k}" aria-pressed="${d.status===k}">${l}</button>`).join("")}</div></div>
     ${d.summary?`<div class="sec"><h3>Kurzinfo</h3><div class="summary">${esc(d.summary)}</div></div>`:""}
     <div class="sec"><div class="kv">${kv.map(([k,v])=>`<span class="k">${esc(k)}</span><span class="v">${k==="Ablage"||k==="Frist"?v:esc(v)}</span>`).join("")}</div></div>
+    ${(d.attachments||[]).length?`<div class="sec"><h3>Weitere Anhänge</h3>${d.attachments.map(a=>`<a class="btn link" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>`).join("")}</div>`:""}
     ${u?`<div class="sec"><button type="button" class="zoomable" data-act="open" aria-label="Dokument groß anzeigen"><img class="thumb" src="${u}" alt="Erste Seite"><span class="zl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg>Vergrößern</span></button></div>`:""}
     <div class="sec"><div class="btnrow"><button type="button" class="btn primary" data-act="open">Dokument öffnen</button><button type="button" class="btn" data-act="share">Teilen</button><button type="button" class="btn" data-act="edit">Bearbeiten</button></div></div>
     ${d.text?`<div class="sec"><details><summary class="status">Erkannter Text</summary><div class="status" style="white-space:pre-wrap;margin-top:8px;font-size:12.5px">${esc(d.text)}</div></details></div>`:""}
@@ -632,6 +635,10 @@ function openSettings(){
         :"Optional: Fristen als Termin mit Erinnerung in den Google Kalender eintragen. Erledigte Briefe werden dort wieder entfernt."}</p>
       <div class="grid2">${field("Erinnerung (Tage vorher)","remD",s.remindDays??3,"number","",'min="1" max="27"')}${field("„Bald fällig“ ab (Tage)","soonD",s.soonDays??14,"number","",'min="1" max="90"')}</div>
       <div class="btnrow">${s.calOn?`<button type="button" class="btn" data-act="caloff">Kalender ausschalten</button>`:`<button type="button" class="btn" data-act="calon">Google Kalender einbinden</button>`}</div></div>
+    <div class="sec"><h3>Import aus Drive und Gmail</h3>
+      <p class="status" style="margin:0">${s.lastImport?`Letzter Import am ${dfmt(s.lastImport.date)}: ${s.lastImport.ok} Dokumente übernommen${s.lastImport.fail?.length?`, ${s.lastImport.fail.length} fehlgeschlagen (Liste bleibt für einen neuen Versuch erhalten)`:""}.`
+        :"Übernimmt vorhandene Briefe aus deinem Google Drive und Gmail anhand der Importliste „dokumente-import.json“. Dafür fragt Google einmalig nach Lesezugriff auf Drive und Gmail. Die Originale bleiben unverändert, die App legt Kopien im Ordner „Dokumente“ an."}</p>
+      <div class="btnrow"><button type="button" class="btn" data-act="import">${s.importMode?"Import fortsetzen":"Import starten"}</button></div></div>
     <div class="sec"><h3>Kategorien</h3>
       <p class="status" style="margin:0">Die App schlägt die Kategorie vor, in der die meisten Stichwörter im Brief vorkommen. Neue Kategorie = neuer Ordner in Drive.</p>
       ${catRows}<div class="btnrow"><button type="button" class="btn" data-act="addcat">Kategorie hinzufügen</button></div></div>
@@ -647,6 +654,7 @@ function openSettings(){
       case "link":closeSheet();return connectDrive();
       case "unlink":S.settings.driveLinked=false;G.token=null;try{localStorage.removeItem("gtok")}catch{};await dbPut("meta",{key:"settings",...S.settings});closeSheet();render();updateChip();return toast("Drive getrennt. Die Dateien bleiben in Drive.");
       case "sync":if(!tokenValid()){closeSheet();return connectDrive(true)}await syncNow();return openSettings();
+      case "import":collectSettings();S.settings.importMode=true;await saveSettings();closeSheet();if(fullScope()&&tokenValid())return runImport();return connectDrive(false);
       case "calon":collectSettings();S.settings.calOn=true;await saveSettings();closeSheet();return connectDrive(false);
       case "caloff":collectSettings();S.settings.calOn=false;await saveSettings();return openSettings();
       case "addcat":collectSettings();S.settings.categories.push({name:"Neue Kategorie",keywords:[]});return openSettings();
@@ -927,10 +935,13 @@ function jpegsToPdf(pages){
 /* ================= Google Drive und Kalender ================= */
 const GOOGLE_CLIENT_ID="592336920931-5s1klnrs64841o02016jk7mknm248rdf.apps.googleusercontent.com";
 const DRIVE_SCOPE="https://www.googleapis.com/auth/drive.file",CAL_SCOPE="https://www.googleapis.com/auth/calendar.events";
+// Nur für den einmaligen Import vorhandener Dateien: voller Drive-Lesezugriff und Gmail lesen
+const DRIVE_FULL="https://www.googleapis.com/auth/drive",GMAIL_RO="https://www.googleapis.com/auth/gmail.readonly";
+const GMAIL="https://gmail.googleapis.com/gmail/v1/users/me";
 const API="https://www.googleapis.com/drive/v3/files",UPLOAD="https://www.googleapis.com/upload/drive/v3/files",CAL="https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente";
 const G={token:null,exp:0,busy:false,dirty:false,last:null,err:null,timer:null,calErr:false};
-const LOCAL_KEYS=["driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn"];
+const LOCAL_KEYS=["driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
 try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()){G.token=t.token;G.exp=t.exp}}catch{}
 const tokenValid=()=>!!G.token&&Date.now()<G.exp-60000;
 const REDIRECT_URI=new URL("./",location.href).href;
@@ -939,7 +950,7 @@ function connectDrive(silent){
   const state=uid();
   glog((silent?"Stille ":"")+"Anmeldung gestartet");
   try{localStorage.setItem("gstate",JSON.stringify({state,silent:!!silent}))}catch{}
-  const p=new URLSearchParams({client_id:GOOGLE_CLIENT_ID,redirect_uri:REDIRECT_URI,response_type:"token",scope:S.settings.calOn?DRIVE_SCOPE+" "+CAL_SCOPE:DRIVE_SCOPE,include_granted_scopes:"true",state});
+  const p=new URLSearchParams({client_id:GOOGLE_CLIENT_ID,redirect_uri:REDIRECT_URI,response_type:"token",scope:[S.settings.importMode?DRIVE_FULL+" "+GMAIL_RO:DRIVE_SCOPE,S.settings.calOn?CAL_SCOPE:""].filter(Boolean).join(" "),include_granted_scopes:"true",state});
   if(silent)p.set("prompt","none");
   location.href="https://accounts.google.com/o/oauth2/v2/auth?"+p.toString();
 }
@@ -954,7 +965,8 @@ function readAuthRedirect(){
   return {token:h.get("access_token"),expires:+h.get("expires_in")||3600,scope:h.get("scope")||""};
 }
 const AUTH=readAuthRedirect();
-if(AUTH?.token){G.token=AUTH.token;G.exp=Date.now()+AUTH.expires*1000;try{localStorage.setItem("gtok",JSON.stringify({token:G.token,exp:G.exp}))}catch{}}
+if(AUTH?.token){G.token=AUTH.token;G.exp=Date.now()+AUTH.expires*1000;try{localStorage.setItem("gtok",JSON.stringify({token:G.token,exp:G.exp}));localStorage.setItem("gscope",AUTH.scope||"")}catch{}}
+const fullScope=()=>{try{return /auth\/drive(\s|$)/.test(localStorage.getItem("gscope")||"")&&/gmail\.readonly/.test(localStorage.getItem("gscope")||"")}catch{return false}};
 async function gfetch(url,opts={}){
   const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:"Bearer "+G.token}});
   if(r.status===401){G.token=null;try{localStorage.removeItem("gtok")}catch{};const e=new Error("auth");e.code="auth";throw e}
@@ -1142,6 +1154,82 @@ async function takeIncoming(f){while(!S.loaded)await new Promise(r=>setTimeout(r
   openNew({file:f})}
 if("launchQueue" in window)launchQueue.setConsumer(async p=>{if(p.files?.length){try{takeIncoming(await p.files[0].getFile())}catch{}}});
 
+/* ================= Import vorhandener Dokumente (einmalig, Liste von Claude) ================= */
+function importStatus(t){const b=$("#importBar");if(!b)return;b.hidden=!t;b.textContent=t||""}
+function b64uToBlob(s,type){const b=atob(String(s).replace(/-/g,"+").replace(/_/g,"/"));const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return new Blob([a],{type})}
+async function pdfText(blob){
+  try{await loadLib(PDFJS,()=>!!window.pdfjsLib);
+    pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+    const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await blob.arrayBuffer())}).promise;let t="";
+    for(let i=1;i<=Math.min(pdf.numPages,8);i++){const tc=await (await pdf.getPage(i)).getTextContent();t+=tc.items.map(x=>x.str).join(" ")+"\n"}
+    return {text:t.replace(/[ \t]+/g," ").trim(),pages:pdf.numPages};
+  }catch{return {text:"",pages:0}}
+}
+function gmailPdfParts(thread,only){
+  const out=[],seen=new Set();
+  const walk=(p,msgId)=>{if(!p)return;
+    const fn=p.filename||"";
+    if(p.body?.attachmentId&&(/\.pdf$/i.test(fn)||p.mimeType==="application/pdf")&&(!only||only.includes(fn))){
+      const k=fn+"|"+(p.body.size||0);if(!seen.has(k)){seen.add(k);out.push({msgId,attId:p.body.attachmentId,filename:fn||"Anhang.pdf"})}}
+    for(const c of p.parts||[])walk(c,msgId)};
+  for(const m of thread.messages||[])walk(m.payload,m.id);
+  return out;
+}
+async function importOne(e){
+  const doc={...blankDoc(),id:e.id,letterDate:e.letterDate||"",sender:e.sender||"",subject:e.subject||"",category:e.category||catNames().at(-1),
+    tags:e.tags||[],summary:e.summary||"",ref:e.ref||"",refLabel:e.ref?"Nummer":"",amount:e.amount??null,status:e.status||"erledigt",text:e.text||"",imported:e.src.type};
+  const target=await wantedFolder(doc),name=fileName(doc);let blob=null;
+  if(e.src.type==="drive"){
+    const c=await (await gfetch(`${API}/${e.src.fileId}/copy?fields=id,webViewLink,size`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,parents:[target]})})).json();
+    doc.driveId=c.id;doc.url=c.webViewLink||`https://drive.google.com/file/d/${c.id}/view`;doc.folder=target;doc.name=name;
+    if(+c.size&&+c.size<8e6)blob=await (await gfetch(`${API}/${c.id}?alt=media`)).blob();
+  }else{
+    const th=await (await gfetch(`${GMAIL}/threads/${e.src.threadId}?format=full`)).json();
+    const parts=gmailPdfParts(th,e.src.files);
+    if(!parts.length){doc.url=`https://mail.google.com/mail/u/0/#all/${e.src.threadId}`;doc.note="Kein PDF-Anhang – Link zur E-Mail."}
+    for(let i=0;i<parts.length;i++){
+      const p=parts[i],a=await (await gfetch(`${GMAIL}/messages/${p.msgId}/attachments/${p.attId}`)).json();
+      const b=b64uToBlob(a.data,"application/pdf"),nm=i?name.replace(/\.pdf$/,`_Anlage-${i}.pdf`):name;
+      const up=await uploadMultipart({name:nm,parents:[target],description:[doc.sender,doc.subject].join(" · ")},b);
+      const url=up.webViewLink||`https://drive.google.com/file/d/${up.id}/view`;
+      if(!i){doc.driveId=up.id;doc.url=url;doc.folder=target;doc.name=name;blob=b}
+      else (doc.attachments=doc.attachments||[]).push({name:p.filename,driveId:up.id,url});
+    }
+  }
+  if(blob){
+    const r=await pdfText(blob);doc.pages=r.pages;if(!doc.text)doc.text=r.text.slice(0,12000);
+    const t=await pdfThumb(blob);if(t)doc.thumbId=await storeFile(t,"vorschau.jpg");
+  }
+  doc.createdAt=doc.updatedAt=new Date().toISOString();
+  await dbPut("docs",doc);S.docs.push(doc);
+}
+async function runImport(){
+  if(G.importing||!tokenValid())return;G.importing=true;let fileId=null;
+  try{
+    importStatus("Import: Importliste wird gesucht …");
+    const r=await (await gfetch(`${API}?q=${q("name='dokumente-import.json' and trashed=false")}&fields=files(id)`)).json();
+    fileId=r.files?.[0]?.id;
+    if(!fileId){toast("Keine Importliste in Drive gefunden");glog("Import: keine Importliste");S.settings.importMode=false;await dbPut("meta",{key:"settings",...S.settings});return}
+    const data=await (await gfetch(`${API}/${fileId}?alt=media`)).json();
+    let catAdded=false;for(const c of data.categories||[])if(!S.settings.categories.some(x=>x.name===c.name)){S.settings.categories.push(c);catAdded=true}
+    if(catAdded)S.settings.updatedAt=new Date().toISOString();
+    await ensureFolders();
+    const todo=(data.entries||[]).filter(e=>!S.docs.some(d=>d.id===e.id)&&!S.deleted[e.id]);const fail=[];
+    glog(`Import gestartet: ${todo.length} Dokumente`);
+    for(let i=0;i<todo.length;i++){
+      const e=todo[i];importStatus(`Import ${i+1} von ${todo.length}: ${e.sender||""} – ${e.subject||""}`);
+      try{await importOne(e)}catch(err){if(err.code==="auth")throw err;fail.push(e.subject||e.id);glog("Import fehlgeschlagen: "+(e.subject||e.id))}
+      if(i%5===4)render();
+    }
+    if(!fail.length)await gfetch(`${API}/${fileId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:`dokumente-import-erledigt-${today()}.json`})});
+    S.settings.importMode=false;S.settings.lastImport={date:today(),ok:todo.length-fail.length,fail};
+    await dbPut("meta",{key:"settings",...S.settings});
+    glog(`Import fertig: ${todo.length-fail.length} übernommen, ${fail.length} fehlgeschlagen`);
+    toast(fail.length?`${todo.length-fail.length} Dokumente übernommen, ${fail.length} fehlgeschlagen`:`${todo.length} Dokumente übernommen`);
+  }catch(err){glog("Import unterbrochen: "+(err?.message||err));toast(err.code==="auth"?"Import unterbrochen: Anmeldung abgelaufen. In den Einstellungen „Import fortsetzen“ tippen.":"Import unterbrochen. In den Einstellungen „Import fortsetzen“ tippen.")}
+  finally{G.importing=false;importStatus("");render();scheduleSync()}
+}
+
 /* ================= Start ================= */
 (async()=>{
   render();
@@ -1160,7 +1248,8 @@ if("launchQueue" in window)launchQueue.setConsumer(async p=>{if(p.files?.length)
     toast(AUTH.error==="access_denied"?"Anmeldung abgebrochen":"Anmeldung bei Google fehlgeschlagen ("+AUTH.error+")");
   }
   if(AUTH?.token)toast(S.settings.calOn?"Mit Google Drive und Kalender verbunden":"Mit Google Drive verbunden");
-  if(S.settings.driveLinked&&tokenValid())syncNow();
+  if(S.settings.driveLinked&&tokenValid())syncNow().then(()=>{if(S.settings.importMode&&fullScope())runImport()});
+  if(S.settings.importMode&&AUTH?.token&&!fullScope()){toast("Für den Import bitte Drive- und Gmail-Zugriff erlauben");glog("Import: Zugriff nicht vollständig erlaubt")}
   document.addEventListener("visibilitychange",async()=>{
     if(document.visibilityState!=="visible")return;
     try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()&&t.token!==G.token){G.token=t.token;G.exp=t.exp}}catch{}
