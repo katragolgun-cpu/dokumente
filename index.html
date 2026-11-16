@@ -807,6 +807,27 @@ async function scanLoad(file){
 // Blatt finden: hellste zusammenhängende Fläche (Otsu-Schwelle), Ecken über Extrempunkte
 // Blatt finden: helle zusammenhängende Fläche. Mehrere Helligkeitsschwellen probieren
 // (heller Tisch neben weißem Papier) und die Fläche nehmen, die das Viereck am besten ausfüllt.
+function polyArea(p){let a=0;for(let k=0;k<p.length;k++){const [x1,y1]=p[k],[x2,y2]=p[(k+1)%p.length];a+=x1*y2-x2*y1}return Math.abs(a)/2}
+// Konvexe Hülle (Monotone Chain)
+function convexHull(pts){
+  const P=pts.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]);if(P.length<3)return P;
+  const cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]),lo=[],up=[];
+  for(const p of P){while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p)}
+  for(let i=P.length-1;i>=0;i--){const p=P[i];while(up.length>=2&&cr(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p)}
+  lo.pop();up.pop();return lo.concat(up);
+}
+// Größtes Viereck aus den Hüllpunkten; Ecken sortiert: oben links, oben rechts, unten rechts, unten links
+function quadFromPoints(pts){
+  let H=convexHull(pts);if(H.length<4)return null;
+  const tri=(a,b,c)=>Math.abs((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]))/2;
+  while(H.length>24){let bi=0,bv=1e18;for(let i=0;i<H.length;i++){const v=tri(H[(i-1+H.length)%H.length],H[i],H[(i+1)%H.length]);if(v<bv){bv=v;bi=i}}H.splice(bi,1)}
+  const n=H.length;let best=null,ba=-1;
+  for(let a=0;a<n;a++)for(let b=a+1;b<n;b++)for(let c=b+1;c<n;c++)for(let d=c+1;d<n;d++){const ar=polyArea([H[a],H[b],H[c],H[d]]);if(ar>ba){ba=ar;best=[H[a],H[b],H[c],H[d]]}}
+  const cx=best.reduce((s,p)=>s+p[0],0)/4,cy=best.reduce((s,p)=>s+p[1],0)/4;
+  best.sort((p,q)=>Math.atan2(p[1]-cy,p[0]-cx)-Math.atan2(q[1]-cy,q[0]-cx));
+  let st=0;best.forEach((p,i)=>{if(p[0]+p[1]<best[st][0]+best[st][1])st=i});
+  return best.slice(st).concat(best.slice(0,st)).map(p=>[p[0],p[1]]);
+}
 function detectQuad(src){
   const W=360,sc=W/Math.max(src.width,src.height),w=Math.max(1,Math.round(src.width*sc)),h=Math.max(1,Math.round(src.height*sc));
   const c=document.createElement("canvas");c.width=w;c.height=h;const x=c.getContext("2d",{willReadFrequently:true});x.filter="blur(2px)";x.drawImage(src,0,0,w,h);
@@ -822,12 +843,10 @@ function detectQuad(src){
         for(const q of [px>0?p-1:-1,px<w-1?p+1:-1,py>0?p-w:-1,py<h-1?p+w:-1])if(q>=0&&!lab[q]&&g[q]>th){lab[q]=cur;st.push(q)}}
       if(size>bestSize){bestSize=size;bestLab=cur}}
     if(!bestSize)return null;
-    let tl=[0,0,1e9],tr=[0,0,-1e9],br=[0,0,-1e9],bl=[0,0,1e9];
-    for(let i=0;i<w*h;i++){if(lab[i]!==bestLab)continue;const px=i%w,py=(i/w)|0;
-      if(px+py<tl[2])tl=[px,py,px+py];if(px+py>br[2])br=[px,py,px+py];if(px-py>tr[2])tr=[px,py,px-py];if(px-py<bl[2])bl=[px,py,px-py]}
-    const q=[tl,tr,br,bl].map(([a,b])=>[a,b]);
-    let area=0;for(let k=0;k<4;k++){const [x1,y1]=q[k],[x2,y2]=q[(k+1)%4];area+=x1*y2-x2*y1}area=Math.abs(area)/2;
-    // Füllgrad: Papier mit Schrift füllt sein Viereck fast ganz; Tischreste verzerren das Viereck
+    // Umriss: je Zeile linkester/rechtester Punkt der Fläche -> konvexe Hülle -> größtes einbeschriebenes Viereck
+    const pts=[];for(let y=0;y<h;y++){let l=-1,r=-1;for(let x=0;x<w;x++)if(lab[y*w+x]===bestLab){if(l<0)l=x;r=x}if(l>=0){pts.push([l,y]);if(r!==l)pts.push([r,y])}}
+    const q=quadFromPoints(pts);if(!q)return null;
+    const area=polyArea(q);
     return {size:bestSize,quad:q,fill:area?bestSize/area:0}};
   const t1=otsu(-1),cands=[];
   for(const th of [t1,otsu(t1),Math.round((t1+otsu(t1))/2)]){const r=comp(th);if(r&&r.size>=w*h*0.12)cands.push(r)}
