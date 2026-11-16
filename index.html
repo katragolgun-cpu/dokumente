@@ -209,6 +209,12 @@ const dfmt=s=>{if(!s)return "";const [y,m,d]=s.split("-");return d+"."+m+"."+y};
 const days=(a,b)=>Math.round((new Date(b+"T12:00:00")-new Date(a+"T12:00:00"))/864e5);
 const eur=n=>(+n||0).toLocaleString("de-DE",{style:"currency",currency:"EUR"});
 const fold=Letter.fold;
+async function copyText(t){
+  try{await navigator.clipboard.writeText(t);return toast("Text kopiert")}catch{}
+  const a=document.createElement("textarea");a.value=t;a.setAttribute("readonly","");a.style.cssText="position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(a);a.select();let ok=false;try{ok=document.execCommand("copy")}catch{}a.remove();
+  toast(ok?"Text kopiert":"Kopieren nicht möglich");
+}
 function toast(msg){const t=$("#toast");t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2600)}
 const catNames=()=>S.settings.categories.map(c=>c.name);
 const docDate=d=>d.letterDate||(d.createdAt||"").slice(0,10)||today();
@@ -585,8 +591,8 @@ async function openView(id){
     <div class="sec"><div class="kv">${kv.map(([k,v])=>`<span class="k">${esc(k)}</span><span class="v">${k==="Ablage"||k==="Frist"?v:esc(v)}</span>`).join("")}</div></div>
     ${(d.attachments||[]).length?`<div class="sec"><h3>Weitere Anhänge</h3>${d.attachments.map(a=>`<a class="btn link" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>`).join("")}</div>`:""}
     ${u?`<div class="sec"><button type="button" class="zoomable" data-act="open" aria-label="Dokument groß anzeigen"><img class="thumb" src="${u}" alt="Erste Seite"><span class="zl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg>Vergrößern</span></button></div>`:""}
-    <div class="sec"><div class="btnrow"><button type="button" class="btn primary" data-act="open">Dokument öffnen</button><button type="button" class="btn" data-act="share">Teilen</button><button type="button" class="btn" data-act="edit">Bearbeiten</button></div></div>
-    ${d.text?`<div class="sec"><details><summary class="status">Erkannter Text</summary><div class="status" style="white-space:pre-wrap;margin-top:8px;font-size:12.5px">${esc(d.text)}</div></details></div>`:""}
+    <div class="sec"><div class="btnrow"><button type="button" class="btn primary" data-act="open">Dokument öffnen</button><button type="button" class="btn" data-act="share">Teilen</button>${d.text?`<button type="button" class="btn" data-act="copytext">Text kopieren</button>`:""}<button type="button" class="btn" data-act="edit">Bearbeiten</button></div></div>
+    ${d.text?`<div class="sec"><details><summary class="status">Erkannter Text</summary><div class="status" style="white-space:pre-wrap;margin-top:8px;font-size:12.5px;user-select:text;-webkit-user-select:text">${esc(d.text)}</div></details></div>`:""}
     <div class="sec"><div class="btnrow"><button type="button" class="btn danger" data-act="del">Löschen</button></div></div>
   `,`<button type="button" class="btn" data-act="close">Schließen</button>`);
   $("#scrim").addEventListener("click",async e=>{
@@ -595,6 +601,7 @@ async function openView(id){
       case "close":return closeSheet();
       case "open":return openViewer({doc:d});
       case "share":return shareDoc(d);
+      case "copytext":return copyText(d.text);
       case "edit":return openEdit(d);
       case "tagsearch":closeSheet();$("#q").value=b.dataset.t;$("#qClear").hidden=false;S.q=b.dataset.t;return render();
       case "st":d.status=b.dataset.s;d.updatedAt=new Date().toISOString();await dbPut("docs",d);render();scheduleSync();return openView(d.id);
