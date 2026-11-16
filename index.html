@@ -127,6 +127,10 @@ textarea.mono{font-family:var(--f-num);font-size:12.5px}
 #viewerHost .vscroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y pinch-zoom}
 #viewerHost .vpages{display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px;box-sizing:border-box}
 #viewerHost .vpages img{display:block;background:#fff;max-width:none;height:auto;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+#viewerHost .vpg{position:relative;display:block}
+#viewerHost .vtx{position:absolute;inset:0;user-select:text;-webkit-user-select:text;-webkit-touch-callout:default}
+#viewerHost .vtx div{position:absolute;white-space:pre;color:transparent;transform-origin:0 0;line-height:1;font-family:Arial,sans-serif;cursor:text}
+#viewerHost .vtx ::selection{background:rgba(30,120,255,.4);color:transparent}
 #viewerHost .vmsg{color:#ccc;text-align:center;padding:40px 16px;font-size:14px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:40;max-width:90%}
 .scanwrap{display:flex;justify-content:center;margin:12px 0}
@@ -375,7 +379,7 @@ async function ocrBest(img){
 }
 
 /* ================= Großansicht (Fotos und PDF-Seiten, mit Zoom) ================= */
-const V={zoom:1,urls:[],open:false};
+const V={zoom:1,urls:[],open:false,pages:[],textOn:false,key:null,cache:new Map(),busy:false};
 async function docBlob(d){
   const f=d.fileId&&await dbGet("files",d.fileId).catch(()=>null);if(f?.blob)return f.blob;
   if(d.driveId)return await driveBlob(d.driveId);
@@ -410,22 +414,56 @@ function viewerZoom(z,keepCenter=true){
   V.zoom=z;applyZoom();
   if(keepCenter){sc.scrollLeft=cx*sc.scrollWidth-sc.clientWidth/2;sc.scrollTop=cy*sc.scrollHeight-sc.clientHeight/2}
 }
+// Textebene: Texterkennung der angezeigten Seiten, unsichtbarer Text über dem Bild zum Markieren und Kopieren
+async function viewerText(){
+  const btn=$("#vTextBtn");
+  if(V.textOn){V.textOn=false;V.pages.forEach(p=>p.pg.querySelector(".vtx")?.remove());if(btn)btn.textContent="Text markieren";return}
+  if(V.busy||!V.pages.length)return;V.busy=true;
+  try{
+    const cached=V.key&&V.cache.get(V.key);let all=cached||[];
+    if(!cached){
+      if(btn)btn.textContent="Wird geladen …";await ensureTess();
+      for(let i=0;i<V.pages.length;i++){
+        if(!V.open)return;if(btn)btn.textContent=`Text wird erkannt (Seite ${i+1}/${V.pages.length}) …`;
+        const res=await tessWorker.recognize(V.pages[i].blob,{},{text:true,blocks:true}),d=res?.data||{};
+        let lines=d.lines;if(!lines?.length&&d.blocks)lines=d.blocks.flatMap(b=>(b.paragraphs||[]).flatMap(p=>p.lines||[]));
+        all.push((lines||[]).map(l=>({t:(l.text||"").replace(/\s+$/,""),b:l.bbox})).filter(l=>l.t&&l.b));
+      }
+      if(V.key)V.cache.set(V.key,all);
+    }
+    if(!V.open)return;
+    V.pages.forEach((p,i)=>{p.pg.querySelector(".vtx")?.remove();const L=document.createElement("div");L.className="vtx";
+      for(const l of all[i]||[]){const e=document.createElement("div");e.textContent=l.t+"\n";e._b=l.b;L.appendChild(e)}
+      p.pg.appendChild(L)});
+    V.textOn=true;if(btn)btn.textContent="Text ausblenden";layoutText();
+    toast(all.some(x=>x.length)?"Text lange drücken zum Markieren":"Kein Text erkannt");
+  }catch(err){if(btn)btn.textContent="Text markieren";toast("Texterkennung nicht möglich (offline?)")}
+  finally{V.busy=false;setStatus?.("")}
+}
+function layoutText(){
+  if(!V.textOn)return;
+  for(const p of V.pages){const L=p.pg.querySelector(".vtx");if(!L||!p.im.naturalWidth)continue;const s=p.im.clientWidth/p.im.naturalWidth;
+    for(const e of L.children){const b=e._b,h=(b.y1-b.y0)*s,w=(b.x1-b.x0)*s;
+      e.style.left=b.x0*s+"px";e.style.top=b.y0*s+"px";e.style.fontSize=Math.max(4,h*0.9)+"px";e.style.height=h+"px";e.style.transform="none";
+      const mw=e.scrollWidth||1;e.style.transform=`scaleX(${(w/mw).toFixed(3)})`}}
+}
 function applyZoom(){
   const sc=$("#vScroll");if(!sc)return;const w=sc.clientWidth-20;
   sc.querySelectorAll(".vpages img").forEach(im=>im.style.width=Math.round(w*V.zoom)+"px");
+  layoutText();
   const pc=$("#vPct");if(pc)pc.textContent=Math.round(V.zoom*100)+" %";
 }
 async function openViewer(src){
   if(src.doc&&!src.doc.fileId&&!src.doc.driveId&&src.doc.url){window.open(src.doc.url,"_blank");return}
-  V.zoom=1;V.open=true;
+  V.zoom=1;V.open=true;V.pages=[];V.textOn=false;V.key=src.doc?.id||null;
   $("#viewerHost").innerHTML=`<div class="vw" role="dialog" aria-modal="true" aria-label="Großansicht">
-    <div class="vbar"><button type="button" class="btn" data-v="close">Schließen</button>
+    <div class="vbar"><button type="button" class="btn" data-v="close">Schließen</button><button type="button" class="btn" data-v="text" id="vTextBtn">Text markieren</button>
       <div class="btnrow" style="align-items:center;gap:6px"><button type="button" class="btn" data-v="out" aria-label="Verkleinern">−</button><span class="pct" id="vPct">100 %</span><button type="button" class="btn" data-v="in" aria-label="Vergrößern">+</button></div></div>
     <div class="vscroll" id="vScroll"><div class="vpages" id="vPages"><div class="vmsg">Wird geladen …</div></div></div></div>`;
   try{history.pushState({viewer:1},"")}catch{}
   const host=$("#viewerHost");
   host.querySelector(".vbar").addEventListener("click",e=>{const b=e.target.closest("[data-v]");if(!b)return;
-    if(b.dataset.v==="close")return closeViewer();if(b.dataset.v==="in")return viewerZoom(V.zoom+0.5);if(b.dataset.v==="out")return viewerZoom(V.zoom-0.5)});
+    if(b.dataset.v==="close")return closeViewer();if(b.dataset.v==="text")return viewerText();if(b.dataset.v==="in")return viewerZoom(V.zoom+0.5);if(b.dataset.v==="out")return viewerZoom(V.zoom-0.5)});
   // Doppeltippen: Stelle vergrößern bzw. zurück auf ganze Breite
   $("#vScroll").addEventListener("dblclick",e=>{const img=e.target.closest("img");if(!img)return;
     const sc=$("#vScroll"),r=img.getBoundingClientRect(),fx=(e.clientX-r.left)/r.width,fy=(e.clientY-r.top)/r.height,top=img.offsetTop;
@@ -433,7 +471,7 @@ async function openViewer(src){
     if(z>1){sc.scrollLeft=fx*img.offsetWidth+img.offsetLeft-sc.clientWidth/2;sc.scrollTop=img.offsetTop+fy*img.offsetHeight-sc.clientHeight/2}else sc.scrollTop=top-10});
   const box=$("#vPages");let first=true;
   const add=blob=>{if(!V.open)return;if(first){box.innerHTML="";first=false}const u=URL.createObjectURL(blob);V.urls.push(u);
-    const im=new Image();im.src=u;im.alt="Seite";im.onload=applyZoom;box.appendChild(im);applyZoom()};
+    const pg=document.createElement("div");pg.className="vpg";const im=new Image();im.src=u;im.alt="Seite";im.onload=applyZoom;pg.appendChild(im);box.appendChild(pg);V.pages.push({blob,pg,im});applyZoom()};
   try{
     const pages=await viewerPages(src,add);
     if(!V.open)return;
