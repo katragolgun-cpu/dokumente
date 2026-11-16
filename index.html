@@ -752,24 +752,39 @@ async function scanLoad(file){
   S.scan.cur={src,w,h,quad:detectQuad(src)};drawScanEdit();
 }
 // Blatt finden: hellste zusammenhängende Fläche (Otsu-Schwelle), Ecken über Extrempunkte
+// Blatt finden: helle zusammenhängende Fläche. Mehrere Helligkeitsschwellen probieren
+// (heller Tisch neben weißem Papier) und die Fläche nehmen, die das Viereck am besten ausfüllt.
 function detectQuad(src){
   const W=360,sc=W/Math.max(src.width,src.height),w=Math.max(1,Math.round(src.width*sc)),h=Math.max(1,Math.round(src.height*sc));
   const c=document.createElement("canvas");c.width=w;c.height=h;const x=c.getContext("2d",{willReadFrequently:true});x.filter="blur(2px)";x.drawImage(src,0,0,w,h);
-  const d=x.getImageData(0,0,w,h).data,g=new Uint8Array(w*h),hist=new Array(256).fill(0);
-  for(let i=0;i<w*h;i++){const v=(d[i*4]*0.299+d[i*4+1]*0.587+d[i*4+2]*0.114)|0;g[i]=v;hist[v]++}
-  let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];let sB=0,wB=0,best=0,th=128;
-  for(let t=0;t<256;t++){wB+=hist[t];if(!wB)continue;const wF=w*h-wB;if(!wF)break;sB+=t*hist[t];const mB=sB/wB,mF=(sum-sB)/wF,v=wB*wF*(mB-mF)**2;if(v>best){best=v;th=t}}
-  const lab=new Int32Array(w*h);let bestLab=0,bestSize=0,cur=0;const st=[];
-  for(let i=0;i<w*h;i++){if(g[i]<=th||lab[i])continue;cur++;let size=0;st.push(i);lab[i]=cur;
-    while(st.length){const p=st.pop();size++;const px=p%w,py=(p/w)|0;
-      for(const q of [px>0?p-1:-1,px<w-1?p+1:-1,py>0?p-w:-1,py<h-1?p+w:-1])if(q>=0&&!lab[q]&&g[q]>th){lab[q]=cur;st.push(q)}}
-    if(size>bestSize){bestSize=size;bestLab=cur}}
+  const d=x.getImageData(0,0,w,h).data,g=new Uint8Array(w*h);
+  for(let i=0;i<w*h;i++)g[i]=(d[i*4]*0.299+d[i*4+1]*0.587+d[i*4+2]*0.114)|0;
+  const otsu=(lo)=>{const hist=new Array(256).fill(0);let n=0;for(let i=0;i<w*h;i++)if(g[i]>lo){hist[g[i]]++;n++}
+    let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];let sB=0,wB=0,best=0,th=lo+1;
+    for(let t=lo+1;t<256;t++){wB+=hist[t];if(!wB)continue;const wF=n-wB;if(!wF)break;sB+=t*hist[t];const mB=sB/wB,mF=(sum-sB)/wF,v=wB*wF*(mB-mF)**2;if(v>best){best=v;th=t}}
+    return th};
+  const comp=th=>{const lab=new Int32Array(w*h);let bestLab=0,bestSize=0,cur=0;const st=[];
+    for(let i=0;i<w*h;i++){if(g[i]<=th||lab[i])continue;cur++;let size=0;st.push(i);lab[i]=cur;
+      while(st.length){const p=st.pop();size++;const px=p%w,py=(p/w)|0;
+        for(const q of [px>0?p-1:-1,px<w-1?p+1:-1,py>0?p-w:-1,py<h-1?p+w:-1])if(q>=0&&!lab[q]&&g[q]>th){lab[q]=cur;st.push(q)}}
+      if(size>bestSize){bestSize=size;bestLab=cur}}
+    if(!bestSize)return null;
+    let tl=[0,0,1e9],tr=[0,0,-1e9],br=[0,0,-1e9],bl=[0,0,1e9];
+    for(let i=0;i<w*h;i++){if(lab[i]!==bestLab)continue;const px=i%w,py=(i/w)|0;
+      if(px+py<tl[2])tl=[px,py,px+py];if(px+py>br[2])br=[px,py,px+py];if(px-py>tr[2])tr=[px,py,px-py];if(px-py<bl[2])bl=[px,py,px-py]}
+    const q=[tl,tr,br,bl].map(([a,b])=>[a,b]);
+    let area=0;for(let k=0;k<4;k++){const [x1,y1]=q[k],[x2,y2]=q[(k+1)%4];area+=x1*y2-x2*y1}area=Math.abs(area)/2;
+    // Füllgrad: Papier mit Schrift füllt sein Viereck fast ganz; Tischreste verzerren das Viereck
+    return {size:bestSize,quad:q,fill:area?bestSize/area:0}};
+  const t1=otsu(-1),cands=[];
+  for(const th of [t1,otsu(t1),Math.round((t1+otsu(t1))/2)]){const r=comp(th);if(r&&r.size>=w*h*0.12)cands.push(r)}
   const full=[[0.03,0.03],[0.97,0.03],[0.97,0.97],[0.03,0.97]].map(([a,b])=>[a*src.width,b*src.height]);
-  if(bestSize<w*h*0.15)return full;
-  let tl=[0,0,1e9],tr=[0,0,-1e9],br=[0,0,-1e9],bl=[0,0,1e9];
-  for(let i=0;i<w*h;i++){if(lab[i]!==bestLab)continue;const px=i%w,py=(i/w)|0;
-    if(px+py<tl[2])tl=[px,py,px+py];if(px+py>br[2])br=[px,py,px+py];if(px-py>tr[2])tr=[px,py,px-py];if(px-py<bl[2])bl=[px,py,px-py]}
-  return [tl,tr,br,bl].map(([px,py])=>[px/sc,py/sc]);
+  if(!cands.length)return full;
+  // Lieber etwas Rand zu viel als abgeschnittener Inhalt: größte Fläche nehmen, außer sie ist praktisch das ganze Foto
+  // (Blatt auf hellem Tisch) oder kein sauberes Viereck – dann die strengere Schwelle
+  cands.forEach(c=>c.qa=c.size/c.fill);cands.sort((a,b)=>b.size-a.size);
+  const pick=cands.find(c=>c.qa<w*h*0.9&&c.fill>=0.8)||cands.sort((a,b)=>b.fill-a.fill)[0];
+  return pick.quad.map(([px,py])=>[px/sc,py/sc]);
 }
 function drawScanEdit(){
   const SC=S.scan,cur=SC.cur;
