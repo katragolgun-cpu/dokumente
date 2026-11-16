@@ -116,7 +116,18 @@ textarea.mono{font-family:var(--f-num);font-size:12.5px}
 .tagedit input{flex:1;min-width:120px;padding:6px 8px;font-size:15px}
 .sugg{display:flex;flex-wrap:wrap;gap:6px}
 .sugg button{border:1px dashed var(--line);background:none;color:var(--muted);border-radius:999px;padding:3px 10px;font:inherit;font-size:12.5px}
-.thumb{width:100%;max-height:260px;object-fit:cover;object-position:top;border-radius:10px;border:1px solid var(--line);background:#fff}
+.thumb{width:100%;max-height:260px;object-fit:cover;object-position:top;border-radius:10px;border:1px solid var(--line);background:#fff;display:block}
+.zoomable{position:relative;border:0;padding:0;background:none;display:block;width:100%;cursor:zoom-in}
+.zoomable .zl{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.65);color:#fff;font-size:12.5px;font-weight:600;border-radius:999px;padding:5px 10px;display:flex;align-items:center;gap:5px}
+.zoomable .zl svg{width:14px;height:14px}
+#viewerHost .vw{position:fixed;inset:0;z-index:60;background:#111;display:flex;flex-direction:column}
+#viewerHost .vbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px;background:#1c1c1c;color:#fff}
+#viewerHost .vbar .btn{background:#2c2c2c;color:#fff;border-color:#444;min-width:44px}
+#viewerHost .vbar .pct{font-family:var(--f-num);font-size:13px;min-width:48px;text-align:center}
+#viewerHost .vscroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y pinch-zoom}
+#viewerHost .vpages{display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px;box-sizing:border-box}
+#viewerHost .vpages img{display:block;background:#fff;max-width:none;height:auto;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+#viewerHost .vmsg{color:#ccc;text-align:center;padding:40px 16px;font-size:14px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:40;max-width:90%}
 .scanwrap{display:flex;justify-content:center;margin:12px 0}
 .scanwrap canvas{touch-action:none;border-radius:8px;max-width:100%;background:#000}
@@ -146,6 +157,7 @@ details summary{cursor:pointer}
 <input type="file" id="cam" accept="image/*" capture="environment" hidden>
 <input type="file" id="pickBackup" accept="application/json,.json" hidden>
 <div id="sheetHost"></div>
+<div id="viewerHost"></div>
 <div id="toast" class="toast" hidden></div>
 
 <script src="parser.js"></script>
@@ -303,7 +315,7 @@ async function shrink(file,max,q){
     return await new Promise(res=>cv.toBlob(b=>res(b||file),"image/jpeg",q));}catch{return file}
 }
 async function makeThumb(img){
-  try{const bmp=await createImageBitmap(img);const sc=Math.min(1,240/Math.max(bmp.width,bmp.height));
+  try{const bmp=await createImageBitmap(img);const sc=Math.min(1,560/Math.max(bmp.width,bmp.height));
     const cv=document.createElement("canvas");cv.width=Math.round(bmp.width*sc);cv.height=Math.round(bmp.height*sc);
     const g=cv.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,cv.width,cv.height);g.drawImage(bmp,0,0,cv.width,cv.height);
     return await new Promise(r=>cv.toBlob(r,"image/jpeg",0.7));}catch{return null}
@@ -312,7 +324,7 @@ async function pdfThumb(file){
   try{await loadLib(PDFJS,()=>!!window.pdfjsLib);
     pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
     const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;const page=await pdf.getPage(1);
-    const vp0=page.getViewport({scale:1}),vp=page.getViewport({scale:300/Math.max(vp0.width,vp0.height)});
+    const vp0=page.getViewport({scale:1}),vp=page.getViewport({scale:700/Math.max(vp0.width,vp0.height)});
     const cv=document.createElement("canvas");cv.width=vp.width;cv.height=vp.height;await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
     return await new Promise(r=>cv.toBlob(r,"image/jpeg",0.7));}catch{return null}
 }
@@ -330,6 +342,74 @@ async function shareDoc(d){
   if(navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:d.subject||"Dokument"})}catch{}}
   else{const u=URL.createObjectURL(f.blob);const a=document.createElement("a");a.href=u;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),5000)}
 }
+
+/* ================= Großansicht (Fotos und PDF-Seiten, mit Zoom) ================= */
+const V={zoom:1,urls:[],open:false};
+async function docBlob(d){
+  const f=d.fileId&&await dbGet("files",d.fileId).catch(()=>null);if(f?.blob)return f.blob;
+  if(d.driveId)return await driveBlob(d.driveId);
+  return null;
+}
+async function viewerPages(src,onPage){
+  let b=src.blob;
+  if(src.images?.length)return src.images;
+  if(src.doc)b=await docBlob(src.doc);
+  if(!b)return [];
+  if(b.type?.startsWith("image/"))return [b];
+  await loadLib(PDFJS,()=>!!window.pdfjsLib);
+  pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await b.arrayBuffer())}).promise;const out=[];
+  for(let i=1;i<=Math.min(pdf.numPages,30);i++){
+    const page=await pdf.getPage(i),vp0=page.getViewport({scale:1}),vp=page.getViewport({scale:Math.min(3,1800/vp0.width)});
+    const cv=document.createElement("canvas");cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+    const g=cv.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,cv.width,cv.height);
+    await page.render({canvasContext:g,viewport:vp}).promise;
+    const blob=await new Promise(r=>cv.toBlob(r,"image/jpeg",0.88));out.push(blob);onPage?.(blob,i,pdf.numPages);
+  }
+  return out;
+}
+function closeViewer(fromPop){
+  if(!V.open)return;V.open=false;V.urls.forEach(u=>URL.revokeObjectURL(u));V.urls=[];$("#viewerHost").innerHTML="";
+  if(!fromPop&&history.state?.viewer)history.back();
+}
+function viewerZoom(z,keepCenter=true){
+  const sc=$("#vScroll");if(!sc)return;
+  const old=V.zoom;z=Math.max(1,Math.min(5,Math.round(z*4)/4));if(z===old)return;
+  const cx=(sc.scrollLeft+sc.clientWidth/2)/sc.scrollWidth,cy=(sc.scrollTop+sc.clientHeight/2)/sc.scrollHeight;
+  V.zoom=z;applyZoom();
+  if(keepCenter){sc.scrollLeft=cx*sc.scrollWidth-sc.clientWidth/2;sc.scrollTop=cy*sc.scrollHeight-sc.clientHeight/2}
+}
+function applyZoom(){
+  const sc=$("#vScroll");if(!sc)return;const w=sc.clientWidth-20;
+  sc.querySelectorAll(".vpages img").forEach(im=>im.style.width=Math.round(w*V.zoom)+"px");
+  const pc=$("#vPct");if(pc)pc.textContent=Math.round(V.zoom*100)+" %";
+}
+async function openViewer(src){
+  V.zoom=1;V.open=true;
+  $("#viewerHost").innerHTML=`<div class="vw" role="dialog" aria-modal="true" aria-label="Großansicht">
+    <div class="vbar"><button type="button" class="btn" data-v="close">Schließen</button>
+      <div class="btnrow" style="align-items:center;gap:6px"><button type="button" class="btn" data-v="out" aria-label="Verkleinern">−</button><span class="pct" id="vPct">100 %</span><button type="button" class="btn" data-v="in" aria-label="Vergrößern">+</button></div></div>
+    <div class="vscroll" id="vScroll"><div class="vpages" id="vPages"><div class="vmsg">Wird geladen …</div></div></div></div>`;
+  try{history.pushState({viewer:1},"")}catch{}
+  const host=$("#viewerHost");
+  host.querySelector(".vbar").addEventListener("click",e=>{const b=e.target.closest("[data-v]");if(!b)return;
+    if(b.dataset.v==="close")return closeViewer();if(b.dataset.v==="in")return viewerZoom(V.zoom+0.5);if(b.dataset.v==="out")return viewerZoom(V.zoom-0.5)});
+  // Doppeltippen: Stelle vergrößern bzw. zurück auf ganze Breite
+  $("#vScroll").addEventListener("dblclick",e=>{const img=e.target.closest("img");if(!img)return;
+    const sc=$("#vScroll"),r=img.getBoundingClientRect(),fx=(e.clientX-r.left)/r.width,fy=(e.clientY-r.top)/r.height,top=img.offsetTop;
+    const z=V.zoom>1?1:2.5;V.zoom=z;applyZoom();
+    if(z>1){sc.scrollLeft=fx*img.offsetWidth+img.offsetLeft-sc.clientWidth/2;sc.scrollTop=img.offsetTop+fy*img.offsetHeight-sc.clientHeight/2}else sc.scrollTop=top-10});
+  const box=$("#vPages");let first=true;
+  const add=blob=>{if(!V.open)return;if(first){box.innerHTML="";first=false}const u=URL.createObjectURL(blob);V.urls.push(u);
+    const im=new Image();im.src=u;im.alt="Seite";im.onload=applyZoom;box.appendChild(im);applyZoom()};
+  try{
+    const pages=await viewerPages(src,add);
+    if(!V.open)return;
+    if(first){if(pages.length)pages.forEach(add);else box.innerHTML=`<div class="vmsg">Die Datei ist auf diesem Gerät nicht vorhanden${src.doc?.driveId?" und Google Drive ist gerade nicht erreichbar":""}.</div>`}
+  }catch{if(V.open)box.innerHTML=`<div class="vmsg">Anzeige nicht möglich (offline?).</div>`}
+}
+window.addEventListener("popstate",()=>{if(V.open)closeViewer(true)});
+window.addEventListener("resize",()=>{if(V.open)applyZoom()});
 
 /* ================= Erfassen ================= */
 async function startCapture(){
@@ -358,7 +438,7 @@ function drawEditor(){
   const sugg=knownTags().filter(t=>!(d.tags||[]).some(x=>fold(x)===fold(t))).slice(0,12);
   sheet(E.mode==="new"?"Neuer Brief":"Bearbeiten",`
     <div id="edStatus" class="status" style="margin-top:10px"></div>
-    ${E.thumbUrl?`<div class="sec"><img class="thumb" src="${E.thumbUrl}" alt="Erste Seite"></div>`:""}
+    ${E.thumbUrl?`<div class="sec"><button type="button" class="zoomable" data-act="zoom" aria-label="Brief groß anzeigen"><img class="thumb" src="${E.thumbUrl}" alt="Erste Seite"><span class="zl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg>Vergrößern</span></button></div>`:""}
     <div class="sec"><h3>Brief</h3><div class="grid2">
       ${field("Absender","f_sender",d.sender,"text","full",'list="dl_senders" autocomplete="off"')}
       ${field("Betreff","f_subject",d.subject,"text","full")}
@@ -434,6 +514,7 @@ function findDuplicate(d){return live().find(x=>x.id!==d.id&&x.letterDate&&x.let
 async function editorClick(e){
   const b=e.target.closest("[data-act]");if(!b)return;const E=S.edit;
   switch(b.dataset.act){
+    case "zoom":return openViewer(E.mode==="new"?(E.input?.images?.length?{images:E.input.images}:{blob:E.input?.file||E.pdf}):{doc:E.doc});
     case "cancel":if(E.mode==="new"&&!confirm("Brief verwerfen?"))return;closeSheet();return;
     case "tagdel":readForm();E.doc.tags.splice(+b.dataset.i,1);return drawEditor();
     case "tagadd":readForm();E.doc.tags.push(b.dataset.t);return drawEditor();
@@ -476,7 +557,7 @@ async function openView(id){
     <div class="sec"><h3>Status</h3><div class="seg">${Object.entries(STATUS).map(([k,l])=>`<button type="button" class="${k}" data-act="st" data-s="${k}" aria-pressed="${d.status===k}">${l}</button>`).join("")}</div></div>
     ${d.summary?`<div class="sec"><h3>Kurzinfo</h3><div class="summary">${esc(d.summary)}</div></div>`:""}
     <div class="sec"><div class="kv">${kv.map(([k,v])=>`<span class="k">${esc(k)}</span><span class="v">${k==="Ablage"||k==="Frist"?v:esc(v)}</span>`).join("")}</div></div>
-    ${u?`<div class="sec"><button type="button" data-act="open" style="border:0;padding:0;background:none"><img class="thumb" src="${u}" alt="Dokument öffnen"></button></div>`:""}
+    ${u?`<div class="sec"><button type="button" class="zoomable" data-act="open" aria-label="Dokument groß anzeigen"><img class="thumb" src="${u}" alt="Erste Seite"><span class="zl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg>Vergrößern</span></button></div>`:""}
     <div class="sec"><div class="btnrow"><button type="button" class="btn primary" data-act="open">Dokument öffnen</button><button type="button" class="btn" data-act="share">Teilen</button><button type="button" class="btn" data-act="edit">Bearbeiten</button></div></div>
     ${d.text?`<div class="sec"><details><summary class="status">Erkannter Text</summary><div class="status" style="white-space:pre-wrap;margin-top:8px;font-size:12.5px">${esc(d.text)}</div></details></div>`:""}
     <div class="sec"><div class="btnrow"><button type="button" class="btn danger" data-act="del">Löschen</button></div></div>
@@ -485,7 +566,7 @@ async function openView(id){
     const b=e.target.closest("[data-act]");if(!b)return;
     switch(b.dataset.act){
       case "close":return closeSheet();
-      case "open":return openLocalFile(d);
+      case "open":return openViewer({doc:d});
       case "share":return shareDoc(d);
       case "edit":return openEdit(d);
       case "tagsearch":closeSheet();$("#q").value=b.dataset.t;$("#qClear").hidden=false;S.q=b.dataset.t;return render();
