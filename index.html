@@ -1,0 +1,1053 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Dokumente</title>
+<meta name="theme-color" content="#24524a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+/* Layout: mobile-first Ablage – Suche oben, Fristen-Leiste, Filter-Chips, Karten je Brief; Bottom-Sheet für Erfassen und Ansicht */
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --sunken:#e7e9e4; --line:#d6dad2;
+  --ink:#1b2420; --muted:#5d6a63;
+  --accent:#24524a; --accent-ink:#ffffff;
+  --ok:#1f7a45; --ok-soft:#dcefe3;
+  --warn:#9a5b00; --warn-soft:#f7ead2;
+  --bad:#b0322b; --bad-soft:#f6dedc;
+  --wait:#3e5a9a; --wait-soft:#dfe6f5;
+  --f-ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-num:ui-monospace,"Roboto Mono","SFMono-Regular",Consolas,monospace;
+  --r:16px; --shadow:0 1px 2px rgba(20,36,30,.06),0 4px 14px rgba(20,36,30,.06); color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#101614; --surface:#18211e; --sunken:#202b27; --line:#2d3a35;
+  --ink:#e5ece8; --muted:#93a39b; --accent:#8cc9b9; --accent-ink:#0d2620;
+  --ok:#5cc489; --ok-soft:#173326; --warn:#e2a54a; --warn-soft:#3a2c14;
+  --bad:#f0827a; --bad-soft:#3d1d1b; --wait:#8fa9e6; --wait-soft:#1e2a45; --shadow:0 1px 2px rgba(0,0,0,.4); color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-ui);font-size:15px;line-height:1.45;-webkit-tap-highlight-color:transparent;
+  padding:calc(12px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(110px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+[hidden]{display:none!important}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+header.top h1{font-size:26px;margin:0;font-weight:700;letter-spacing:-.02em}
+header.top p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.iconbtn{position:relative;border:0;background:var(--surface);box-shadow:var(--shadow);color:var(--ink);border-radius:12px;padding:9px 10px;font:inherit;display:flex;align-items:center}
+.iconbtn svg{width:20px;height:20px}
+.dot{position:absolute;top:-4px;right:-4px;width:12px;height:12px;border-radius:50%;background:var(--warn);border:2px solid var(--bg)}
+.search{position:relative}
+.search input{width:100%;font:inherit;font-size:16px;padding:12px 40px 12px 40px;border:0;border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.search .ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);width:18px;height:18px}
+.search button{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--muted);font-size:22px;line-height:1;padding:4px 8px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 4px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:0;background:var(--surface);box-shadow:var(--shadow);color:var(--ink);border-radius:999px;padding:7px 14px;font:inherit;font-size:13.5px;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.chip .c{font-family:var(--f-num);font-size:12px;opacity:.7;margin-left:4px}
+.due-box{background:linear-gradient(135deg,#24524a,#173a34);color:#fff;border-radius:20px;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+@media (prefers-color-scheme: dark){.due-box{background:linear-gradient(135deg,#1d4740,#10302a)}}
+.due-box h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;opacity:.85}
+.due-item{display:flex;justify-content:space-between;gap:10px;align-items:center;border:0;background:rgba(255,255,255,.1);color:inherit;font:inherit;text-align:left;border-radius:12px;padding:9px 12px;width:100%}
+.due-item .t{font-weight:600;font-size:14.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.due-item .s{font-size:12.5px;opacity:.85}
+.due-item .d{font-family:var(--f-num);font-size:13px;white-space:nowrap;font-weight:600}
+.due-item.over .d{color:#ffc7c2}
+.list{display:flex;flex-direction:column;gap:10px}
+.year{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin-top:6px}
+.card{background:var(--surface);border:0;box-shadow:var(--shadow);border-radius:var(--r);padding:13px 15px;display:flex;gap:12px;text-align:left;font:inherit;color:inherit;width:100%;align-items:flex-start}
+.card:active{transform:scale(.99)}
+.card .th{flex:none;width:46px;height:60px;border-radius:6px;background:var(--sunken);object-fit:cover;object-position:top;border:1px solid var(--line)}
+.card .th.ph{display:grid;place-items:center;color:var(--muted)}
+.card .th.ph svg{width:22px;height:22px}
+.card .body{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px}
+.card .r1{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.card .snd{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.card .dt{font-family:var(--f-num);font-size:12.5px;color:var(--muted);white-space:nowrap}
+.card .sbj{font-size:14px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.card .meta{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:3px}
+.card .hit{font-size:12.5px;color:var(--muted);background:var(--sunken);border-radius:8px;padding:5px 8px;margin-top:3px}
+.card .hit mark{background:var(--warn-soft);color:var(--ink);border-radius:3px;padding:0 1px}
+.tag{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--sunken);color:var(--ink)}
+.stamp{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:6px;border:1.5px solid currentColor;white-space:nowrap}
+.s-neu{color:var(--wait);background:var(--wait-soft)} .s-todo{color:var(--warn);background:var(--warn-soft)} .s-ok{color:var(--ok);background:var(--ok-soft)} .s-bad{color:var(--bad);background:var(--bad-soft)}
+.empty{background:var(--surface);box-shadow:var(--shadow);border-radius:var(--r);padding:24px 16px;text-align:center;color:var(--muted)}
+.fab{position:fixed;right:max(18px,calc(env(safe-area-inset-right,0px) + 18px));bottom:calc(22px + env(safe-area-inset-bottom,0px));height:58px;display:flex;align-items:center;gap:8px;background:var(--accent);color:var(--accent-ink);border:0;border-radius:29px;padding:0 22px 0 18px;box-shadow:0 6px 20px rgba(0,0,0,.22);z-index:7;font:inherit;font-weight:700;font-size:15px}
+.fab svg{width:24px;height:24px}
+.scrim{position:fixed;inset:0;background:rgba(10,18,15,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg);width:100%;max-width:760px;max-height:94%;overflow-y:auto;border-radius:18px 18px 0 0;
+  padding:0 max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.sheet-head{position:sticky;top:0;background:var(--bg);display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 0 10px;z-index:2;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.sheet-head h2{margin:0;font-size:18px;min-width:0;overflow-wrap:break-word}
+.sec{background:var(--surface);box-shadow:var(--shadow);border-radius:var(--r);padding:14px;margin-top:12px;display:flex;flex-direction:column;gap:10px}
+.sec h3{margin:0;font-size:12.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.hero .snd{font-size:13px;color:var(--muted);font-weight:600}
+.hero .sbj{font-size:19px;font-weight:700;line-height:1.3}
+.summary{white-space:pre-line;font-size:14.5px}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;font-size:14px}
+.kv .k{color:var(--muted);font-size:13px}
+.kv .v{overflow-wrap:anywhere}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.seg button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:10px 6px;font:inherit;font-size:14px;font-weight:600}
+.seg button[aria-pressed="true"].neu{background:var(--wait-soft);color:var(--wait);border-color:var(--wait)}
+.seg button[aria-pressed="true"].todo{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.seg button[aria-pressed="true"].erledigt{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted);min-width:0}
+label.f.full{grid-column:1/-1}
+input,select,textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px;width:100%;min-width:0}
+textarea{resize:vertical;font-size:15px}
+textarea.mono{font-family:var(--f-num);font-size:12.5px}
+.btnrow{display:flex;flex-wrap:wrap;gap:8px}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:9px 13px;font:inherit;font-size:14px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.link{border:0;background:none;color:var(--accent);font-weight:600;padding:6px 0}
+.btn[disabled]{opacity:.55}
+.status{font-size:13.5px;color:var(--muted)} .status.err{color:var(--bad)}
+.hint{background:var(--warn-soft);color:var(--warn);border-radius:9px;padding:8px 10px;font-size:13.5px}
+.tagedit{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tagedit .tag{display:inline-flex;align-items:center;gap:4px;padding:4px 6px 4px 10px;font-size:13px}
+.tagedit .tag button{border:0;background:none;color:var(--muted);font-size:16px;line-height:1;padding:0 2px}
+.tagedit input{flex:1;min-width:120px;padding:6px 8px;font-size:15px}
+.sugg{display:flex;flex-wrap:wrap;gap:6px}
+.sugg button{border:1px dashed var(--line);background:none;color:var(--muted);border-radius:999px;padding:3px 10px;font:inherit;font-size:12.5px}
+.thumb{width:100%;max-height:260px;object-fit:cover;object-position:top;border-radius:10px;border:1px solid var(--line);background:#fff}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:40;max-width:90%}
+.scanwrap{display:flex;justify-content:center;margin:12px 0}
+.scanwrap canvas{touch-action:none;border-radius:8px;max-width:100%;background:#000}
+.thumbs{display:flex;gap:10px;flex-wrap:wrap}
+.thumbs .pg{display:flex;flex-direction:column;align-items:center;gap:2px}
+.thumbs img{width:84px;height:118px;object-fit:cover;border:1px solid var(--line);border-radius:6px;background:#fff}
+.catrow{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--line)}
+.catrow:last-of-type{border-bottom:0}
+details summary{cursor:pointer}
+@media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div><h1>Dokumente</h1><p id="sub">Briefe erfassen und wiederfinden</p></div>
+    <button class="iconbtn" id="btnSettings" type="button" aria-label="Einstellungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="dot" id="settingsDot" hidden></span></button>
+  </header>
+  <div class="search" role="search"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input type="text" inputmode="search" id="q" placeholder="Suchen: Absender, Schlagwort, Text, Aktenzeichen" aria-label="Dokumente durchsuchen" autocomplete="off" enterkeyhint="search"><button type="button" id="qClear" aria-label="Suche leeren" hidden>×</button></div>
+  <section id="dueBox" class="due-box" hidden></section>
+  <nav class="chips" id="statusChips" aria-label="Status"></nav>
+  <nav class="chips" id="catChips" aria-label="Kategorien"></nav>
+  <section class="list" id="list" aria-live="polite"><div class="empty">Dokumente werden geladen …</div></section>
+</div>
+<button class="fab" id="btnAdd" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 12h8"/></svg>Brief erfassen</button>
+<input type="file" id="pick" accept="image/*,application/pdf" hidden>
+<input type="file" id="cam" accept="image/*" capture="environment" hidden>
+<input type="file" id="pickBackup" accept="application/json,.json" hidden>
+<div id="sheetHost"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="parser.js"></script>
+<script>
+"use strict";
+/* ================= Speicher (IndexedDB, nur auf diesem Gerät) ================= */
+const DB_NAME="dokumente",DB_VER=1;
+let _db;
+function idb(){
+  if(_db)return Promise.resolve(_db);
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=()=>{const d=r.result;
+      if(!d.objectStoreNames.contains("docs"))d.createObjectStore("docs",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("files"))d.createObjectStore("files",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("meta"))d.createObjectStore("meta",{keyPath:"key"});};
+    r.onsuccess=()=>{_db=r.result;res(_db)};r.onerror=()=>rej(r.error);
+  });
+}
+async function tx(store,mode,fn){
+  const d=await idb();
+  return new Promise((res,rej)=>{const t=d.transaction(store,mode);const s=t.objectStore(store);let out;
+    const r=fn(s);if(r&&"onsuccess" in r)r.onsuccess=()=>out=r.result;
+    t.oncomplete=()=>res(out);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)});
+}
+const dbAll=s=>tx(s,"readonly",st=>st.getAll());
+const dbGet=(s,k)=>tx(s,"readonly",st=>st.get(k));
+const dbPut=(s,v)=>tx(s,"readwrite",st=>st.put(v));
+const dbDel=(s,k)=>tx(s,"readwrite",st=>st.delete(k));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+/* ================= Zustand ================= */
+const DEFAULT_CATEGORIES=[
+  {name:"Finanzamt/Steuern",keywords:["finanzamt","steuer","steuernummer","steuerbescheid","grundsteuer","einkommensteuer","kfz-steuer","hauptzollamt","elster","steuer-id"]},
+  {name:"Wohnen/Vermieter",keywords:["miete","mieter","vermieter","wohnung","nebenkosten","betriebskosten","heizkosten","gewoge","hausverwaltung","techem","ista","hausgeld","eigentümer","stadtwerke","strom","gas","wasser","schornsteinfeger"]},
+  {name:"Versicherung/Bank",keywords:["versicherung","versicherungsschein","police","beitragsanpassung","sparkasse","volksbank","bank","konto","kontoauszug","kredit","darlehen","depot","kreditkarte","axa","allianz","huk","schufa"]},
+  {name:"Behörden/Sonstiges",keywords:["stadt","amt","behörde","familienkasse","kindergeld","rentenversicherung","kita","schule","bürgeramt","beitragsservice","rundfunk","telekom","vodafone","vertrag"]}
+];
+const DEFAULT_SETTINGS={categories:DEFAULT_CATEGORIES,soonDays:14,calOn:false,remindDays:3,lastBackup:null};
+const STATUS={neu:"Neu",todo:"Zu erledigen",erledigt:"Erledigt"};
+const STATUS_CLS={neu:"s-neu",todo:"s-todo",erledigt:"s-ok"};
+const S={docs:[],deleted:{},trash:[],settings:structuredClone(DEFAULT_SETTINGS),loaded:false,status:"offen",cat:"alle",q:"",edit:null,scan:null};
+
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const today=()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
+const dfmt=s=>{if(!s)return "";const [y,m,d]=s.split("-");return d+"."+m+"."+y};
+const days=(a,b)=>Math.round((new Date(b+"T12:00:00")-new Date(a+"T12:00:00"))/864e5);
+const eur=n=>(+n||0).toLocaleString("de-DE",{style:"currency",currency:"EUR"});
+const fold=Letter.fold;
+function toast(msg){const t=$("#toast");t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2600)}
+const catNames=()=>S.settings.categories.map(c=>c.name);
+const docDate=d=>d.letterDate||(d.createdAt||"").slice(0,10)||today();
+const live=()=>S.docs.filter(d=>!S.deleted[d.id]);
+
+/* ================= Suche (Volltext) ================= */
+function hay(d){return fold([d.sender,d.subject,d.category,(d.tags||[]).join(" "),d.summary,d.refLabel,d.ref,d.note,dfmt(d.letterDate),d.letterDate,d.deadline&&dfmt(d.deadline),d.amount!=null?String(d.amount).replace(".",","):"",d.text].join(" \n "))}
+function matchQ(d,q){
+  const words=fold(q).split(/\s+/).filter(Boolean);if(!words.length)return true;
+  const h=hay(d),hc=h.replace(/[^a-z0-9]/g,"");
+  return words.every(w=>h.includes(w)||(w.replace(/[^a-z0-9]/g,"").length>=4&&hc.includes(w.replace(/[^a-z0-9]/g,""))));
+}
+// Textstelle mit dem ersten Treffer zeigen (nur wenn der Treffer im erkannten Text liegt)
+function snippet(d,q){
+  const w=fold(q).split(/\s+/).filter(Boolean)[0];if(!w||!d.text)return "";
+  const meta=fold([d.sender,d.subject,(d.tags||[]).join(" "),d.category].join(" "));if(meta.includes(w))return "";
+  const t=d.text.replace(/\s+/g," "),ft=fold(t);const i=ft.indexOf(w);if(i<0)return "";
+  // fold verändert die Länge (ä->ae): Position grob zurückrechnen
+  let pos=0,acc=0;while(pos<t.length&&acc<i){acc+=fold(t[pos]).length;pos++}
+  const a=Math.max(0,pos-50),b=Math.min(t.length,pos+w.length+70);
+  let len=0,k=pos;while(k<t.length&&len<w.length){len+=fold(t[k]).length;k++}
+  return (a>0?"… ":"")+esc(t.slice(a,pos))+"<mark>"+esc(t.slice(pos,k))+"</mark>"+esc(t.slice(k,b))+(b<t.length?" …":"");
+}
+
+/* ================= Liste ================= */
+const isOpen=d=>d.status!=="erledigt";
+function dueInfo(d){
+  if(!d.deadline||!isOpen(d))return null;
+  const n=days(today(),d.deadline);
+  return {n,text:n<0?`seit ${-n} Tag${n===-1?"":"en"} abgelaufen`:n===0?"heute":n===1?"morgen":`in ${n} Tagen`,over:n<0,soon:n<=S.settings.soonDays};
+}
+const ICON_DOC=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>`;
+const thumbCache=new Map();
+async function thumbUrl(d){
+  if(!d.thumbId)return null;if(thumbCache.has(d.thumbId))return thumbCache.get(d.thumbId);
+  const f=await dbGet("files",d.thumbId).catch(()=>null);if(!f)return null;const u=URL.createObjectURL(f.blob);thumbCache.set(d.thumbId,u);return u;
+}
+function render(){
+  if(!S.loaded)return;
+  const all=live();
+  $("#sub").textContent=all.length?`${all.length} Dokument${all.length===1?"":"e"}${S.settings.driveLinked?" · in Google Drive":""}`:"Briefe erfassen und wiederfinden";
+  // Fristen
+  const due=all.map(d=>({d,i:dueInfo(d)})).filter(x=>x.i&&x.i.soon).sort((a,b)=>a.d.deadline.localeCompare(b.d.deadline));
+  const box=$("#dueBox");box.hidden=!due.length||!!S.q;
+  if(due.length)box.innerHTML=`<h2>Bald fällig</h2>`+due.slice(0,6).map(({d,i})=>`<button type="button" class="due-item${i.over?" over":""}" data-id="${d.id}">
+      <span style="min-width:0"><span class="t">${esc(d.sender||"Unbekannt")}</span><br><span class="s">${esc(d.deadlineKind||"Frist")}: ${esc(d.subject||"")}</span></span>
+      <span class="d">${dfmt(d.deadline)}<br><span class="s">${i.text}</span></span></button>`).join("")+(due.length>6?`<span class="s" style="font-size:12.5px;opacity:.85">und ${due.length-6} weitere</span>`:"");
+  // Filter
+  const cnt=f=>all.filter(f).length;
+  const sts=[["offen","Offen",d=>isOpen(d)],["neu","Neu",d=>d.status==="neu"],["todo","Zu erledigen",d=>d.status==="todo"],["erledigt","Erledigt",d=>d.status==="erledigt"],["alle","Alle",()=>true]];
+  $("#statusChips").innerHTML=sts.map(([k,l,f])=>`<button type="button" class="chip" data-status="${k}" aria-pressed="${S.status===k}">${l}<span class="c">${cnt(f)}</span></button>`).join("");
+  const stF=(sts.find(s=>s[0]===S.status)||sts[0])[2];
+  const cats=["alle",...catNames()];
+  $("#catChips").innerHTML=cats.map(c=>`<button type="button" class="chip" data-cat="${esc(c)}" aria-pressed="${S.cat===c}">${c==="alle"?"Alle Kategorien":esc(c)}<span class="c">${cnt(d=>(c==="alle"||d.category===c)&&stF(d))}</span></button>`).join("");
+  // Liste
+  let rows=all.filter(d=>(S.q?true:stF(d))&&(S.cat==="alle"||d.category===S.cat)&&matchQ(d,S.q));
+  rows.sort((a,b)=>docDate(b).localeCompare(docDate(a))||(b.createdAt||"").localeCompare(a.createdAt||""));
+  const list=$("#list");
+  if(!all.length){list.innerHTML=`<div class="empty">Noch keine Dokumente.<br>Tippe auf „Brief erfassen“ und fotografiere den ersten Brief.</div>`;return}
+  if(!rows.length){list.innerHTML=`<div class="empty">${S.q?"Nichts gefunden.":"Keine Dokumente in dieser Ansicht."}</div>`;return}
+  let html="",year="";
+  for(const d of rows){
+    const y=docDate(d).slice(0,4);if(y!==year){year=y;html+=`<div class="year">${y}</div>`}
+    const i=dueInfo(d),sn=S.q?snippet(d,S.q):"";
+    html+=`<button type="button" class="card" data-id="${d.id}">
+      ${d.thumbId?`<img class="th" data-thumb="${d.thumbId}" alt="">`:`<span class="th ph">${ICON_DOC}</span>`}
+      <span class="body">
+        <span class="r1"><span class="snd">${esc(d.sender||"Unbekannter Absender")}</span><span class="dt">${dfmt(docDate(d))}</span></span>
+        <span class="sbj">${esc(d.subject||"Ohne Betreff")}</span>
+        <span class="meta"><span class="stamp ${STATUS_CLS[d.status]||"s-neu"}">${STATUS[d.status]||"Neu"}</span>${i?`<span class="stamp ${i.over||i.n<=3?"s-bad":"s-todo"}">${esc(d.deadlineKind||"Frist")} ${i.text}</span>`:""}${(d.tags||[]).slice(0,4).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</span>
+        ${sn?`<span class="hit">${sn}</span>`:""}
+      </span></button>`;
+  }
+  list.innerHTML=html;
+  list.querySelectorAll("img[data-thumb]").forEach(async img=>{const d=S.docs.find(x=>x.thumbId===img.dataset.thumb);const u=d&&await thumbUrl(d);if(u)img.src=u;else img.replaceWith(Object.assign(document.createElement("span"),{className:"th ph",innerHTML:ICON_DOC}))});
+}
+$("#statusChips").addEventListener("click",e=>{const b=e.target.closest("[data-status]");if(!b)return;S.status=b.dataset.status;render()});
+$("#catChips").addEventListener("click",e=>{const b=e.target.closest("[data-cat]");if(!b)return;S.cat=b.dataset.cat;render()});
+$("#list").addEventListener("click",e=>{const b=e.target.closest("[data-id]");if(b)openView(b.dataset.id)});
+$("#dueBox").addEventListener("click",e=>{const b=e.target.closest("[data-id]");if(b)openView(b.dataset.id)});
+$("#btnAdd").addEventListener("click",()=>startCapture());
+$("#btnSettings").addEventListener("click",()=>openSettings());
+(()=>{const q=$("#q"),c=$("#qClear");let t;
+q.addEventListener("input",()=>{c.hidden=!q.value;clearTimeout(t);t=setTimeout(()=>{S.q=q.value.trim();render()},150)});
+c.addEventListener("click",()=>{q.value="";c.hidden=true;S.q="";render();q.focus()});
+q.addEventListener("keydown",e=>{if(e.key==="Escape"){q.value="";c.hidden=true;S.q="";render()}else if(e.key==="Enter")q.blur()});})();
+
+/* ================= Bausteine ================= */
+function closeSheet(){if(S.edit?.urls)S.edit.urls.forEach(u=>URL.revokeObjectURL(u));S.edit=null;$("#sheetHost").innerHTML=""}
+function sheet(title,body,headBtns){
+  $("#sheetHost").innerHTML=`<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+   <div class="sheet-head"><h2>${esc(title)}</h2><div class="btnrow">${headBtns}</div></div>${body}</div></div>`;
+  $("#scrim").addEventListener("click",e=>{if(e.target.id==="scrim"&&S.edit?.mode!=="new")closeSheet()});
+}
+function setStatus(msg,err){const s=$("#edStatus");if(s){s.textContent=msg||"";s.className="status"+(err?" err":"")}}
+function field(label,id,val,type="text",cls="",extra=""){
+  return `<label class="f ${cls}">${label}<input id="${id}" type="${type}" value="${esc(val??"")}" ${extra}></label>`;
+}
+async function storeFile(blob,name){const id=uid();await dbPut("files",{id,blob,name,type:blob.type});return id}
+async function shrink(file,max,q){
+  if(!file.type.startsWith("image/"))return file;
+  try{const bmp=await createImageBitmap(file);const sc=Math.min(1,max/Math.max(bmp.width,bmp.height));
+    const cv=document.createElement("canvas");cv.width=Math.round(bmp.width*sc);cv.height=Math.round(bmp.height*sc);
+    cv.getContext("2d").drawImage(bmp,0,0,cv.width,cv.height);
+    return await new Promise(res=>cv.toBlob(b=>res(b||file),"image/jpeg",q));}catch{return file}
+}
+async function makeThumb(img){
+  try{const bmp=await createImageBitmap(img);const sc=Math.min(1,240/Math.max(bmp.width,bmp.height));
+    const cv=document.createElement("canvas");cv.width=Math.round(bmp.width*sc);cv.height=Math.round(bmp.height*sc);
+    const g=cv.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,cv.width,cv.height);g.drawImage(bmp,0,0,cv.width,cv.height);
+    return await new Promise(r=>cv.toBlob(r,"image/jpeg",0.7));}catch{return null}
+}
+async function pdfThumb(file){
+  try{await loadLib(PDFJS,()=>!!window.pdfjsLib);
+    pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+    const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;const page=await pdf.getPage(1);
+    const vp0=page.getViewport({scale:1}),vp=page.getViewport({scale:300/Math.max(vp0.width,vp0.height)});
+    const cv=document.createElement("canvas");cv.width=vp.width;cv.height=vp.height;await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
+    return await new Promise(r=>cv.toBlob(r,"image/jpeg",0.7));}catch{return null}
+}
+async function openLocalFile(d){
+  const f=d.fileId&&await dbGet("files",d.fileId);
+  if(f){const u=URL.createObjectURL(f.blob);window.open(u,"_blank");setTimeout(()=>URL.revokeObjectURL(u),60000);return}
+  if(d.url){window.open(d.url,"_blank");return}
+  toast("Datei ist auf diesem Gerät nicht vorhanden.");
+}
+async function shareDoc(d){
+  let f=d.fileId&&await dbGet("files",d.fileId);
+  if(!f&&d.driveId){const b=await driveBlob(d.driveId);if(b)f={blob:b}}
+  if(!f){toast("Datei nicht verfügbar.");return}
+  const file=new File([f.blob],d.name||fileName(d),{type:"application/pdf"});
+  if(navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:d.subject||"Dokument"})}catch{}}
+  else{const u=URL.createObjectURL(f.blob);const a=document.createElement("a");a.href=u;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),5000)}
+}
+
+/* ================= Erfassen ================= */
+async function startCapture(){
+  const r=await scanDocument("Brief erfassen");if(!r)return;
+  openNew(r);
+}
+function knownTags(){const m=new Map();for(const d of live())for(const t of d.tags||[])m.set(fold(t),t);return [...m.values()]}
+function knownSenders(){return [...new Set(live().map(d=>d.sender).filter(Boolean))]}
+function blankDoc(){return {id:uid(),createdAt:new Date().toISOString(),updatedAt:null,letterDate:"",sender:"",subject:"",category:"",tags:[],summary:"",ref:"",refLabel:"",amount:null,deadline:"",deadlineKind:"",status:"neu",note:"",text:"",pages:0}}
+async function openNew(input){
+  const d=blankDoc();
+  S.edit={mode:"new",doc:d,input,urls:[],auto:true,est:false};
+  // Datei vorbereiten: PDF für die Ablage, Vorschaubild
+  let pdf=input.pdf||null,first=input.images?.[0]||null;
+  if(!pdf&&input.file){pdf=input.file.type==="application/pdf"||/\.pdf$/i.test(input.file.name||"")?input.file:await toPdf(input.file);if(input.file.type?.startsWith("image/"))first=input.file}
+  S.edit.pdf=pdf;d.pages=input.images?.length||1;
+  const th=first?await makeThumb(first):await pdfThumb(pdf);
+  S.edit.thumb=th;if(th){const u=URL.createObjectURL(th);S.edit.urls.push(u);S.edit.thumbUrl=u}
+  drawEditor();
+  runOcr(input);
+}
+function openEdit(d){S.edit={mode:"edit",doc:structuredClone(d),urls:[],auto:false};drawEditor()}
+function drawEditor(){
+  const E=S.edit,d=E.doc;
+  const cats=catNames();if(d.category&&!cats.includes(d.category))cats.push(d.category);
+  const sugg=knownTags().filter(t=>!(d.tags||[]).some(x=>fold(x)===fold(t))).slice(0,12);
+  sheet(E.mode==="new"?"Neuer Brief":"Bearbeiten",`
+    <div id="edStatus" class="status" style="margin-top:10px"></div>
+    ${E.thumbUrl?`<div class="sec"><img class="thumb" src="${E.thumbUrl}" alt="Erste Seite"></div>`:""}
+    <div class="sec"><h3>Brief</h3><div class="grid2">
+      ${field("Absender","f_sender",d.sender,"text","full",'list="dl_senders" autocomplete="off"')}
+      ${field("Betreff","f_subject",d.subject,"text","full")}
+      ${field("Briefdatum","f_date",d.letterDate,"date")}
+      <label class="f">Kategorie<select id="f_cat">${cats.map(c=>`<option ${c===(d.category||cats[cats.length-1])?"selected":""}>${esc(c)}</option>`).join("")}</select></label>
+      ${field("Aktenzeichen / Nummer","f_ref",d.ref,"text","","autocomplete=\"off\"")}
+      ${field("Betrag (€)","f_amount",d.amount!=null?String(d.amount).replace(".",","):"","text","",'inputmode="decimal"')}
+    </div><datalist id="dl_senders">${knownSenders().map(s=>`<option value="${esc(s)}">`).join("")}</datalist></div>
+    <div class="sec"><h3>Frist</h3><div class="grid2">
+      ${field("Frist bis","f_deadline",d.deadline,"date")}
+      ${field("Art der Frist","f_dlkind",d.deadlineKind,"text","",'list="dl_kinds" placeholder="z. B. Zahlung"')}
+    </div><datalist id="dl_kinds">${["Zahlung","Einspruch","Widerspruch","Rückmeldung","Kündigung","Termin","Frist"].map(k=>`<option value="${k}">`).join("")}</datalist>
+    ${E.est&&d.deadline?`<div class="hint">Frist aus „innerhalb eines Monats“ o. ä. berechnet. Bitte prüfen.</div>`:""}</div>
+    <div class="sec"><h3>Schlagwörter</h3>
+      <div class="tagedit" id="tagEdit">${(d.tags||[]).map((t,i)=>`<span class="tag">${esc(t)}<button type="button" data-act="tagdel" data-i="${i}" aria-label="${esc(t)} entfernen">×</button></span>`).join("")}<input id="tagIn" placeholder="Schlagwort hinzufügen" enterkeyhint="done" autocomplete="off"></div>
+      ${sugg.length?`<div class="sugg">${sugg.map(t=>`<button type="button" data-act="tagadd" data-t="${esc(t)}">+ ${esc(t)}</button>`).join("")}</div>`:""}</div>
+    <div class="sec"><h3>Kurzinfo</h3><textarea id="f_summary" rows="5">${esc(d.summary)}</textarea>
+      <div class="btnrow"><button type="button" class="btn link" data-act="resum">Kurzinfo neu aus den Feldern bilden</button></div></div>
+    <div class="sec"><h3>Status</h3><div class="seg">${Object.entries(STATUS).map(([k,l])=>`<button type="button" class="${k}" data-act="st" data-s="${k}" aria-pressed="${d.status===k}">${l}</button>`).join("")}</div>
+      ${field("Notiz","f_note",d.note,"text","",'placeholder="z. B. Einspruch geschickt am …"')}</div>
+    <div class="sec"><details><summary class="status">Erkannter Text${d.text?` (${d.text.length} Zeichen)`:""}</summary>
+      <textarea id="f_text" class="mono" rows="10" style="margin-top:8px">${esc(d.text)}</textarea>
+      <div class="btnrow" style="margin-top:6px"><button type="button" class="btn" data-act="reparse">Felder neu aus dem Text lesen</button></div></details></div>
+  `,`<button type="button" class="btn" data-act="cancel">Abbrechen</button><button type="button" class="btn primary" data-act="save">Speichern</button>`);
+  $("#scrim").addEventListener("click",editorClick);
+  $("#tagIn").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===","){e.preventDefault();addTagFromInput()}});
+  $("#tagIn").addEventListener("blur",()=>addTagFromInput());
+  if(E.ocrBusy)setStatus(E.ocrMsg||"Text wird erkannt …");
+}
+function readForm(){
+  const d=S.edit.doc,v=id=>$("#"+id)?.value??"";
+  d.sender=v("f_sender").trim();d.subject=v("f_subject").trim();d.letterDate=v("f_date");d.category=v("f_cat");
+  d.ref=v("f_ref").trim();const a=v("f_amount").trim().replace(/\s|€/g,"");d.amount=a?(+(/,/.test(a)?a.replace(/\./g,"").replace(",","."):a)||null):null;
+  if(d.ref&&!d.refLabel)d.refLabel="Aktenzeichen";if(!d.ref)d.refLabel="";
+  d.deadline=v("f_deadline");d.deadlineKind=v("f_dlkind").trim();d.summary=v("f_summary");d.note=v("f_note").trim();
+  if($("#f_text"))d.text=v("f_text");
+}
+function addTagFromInput(){
+  const inp=$("#tagIn");if(!inp)return;const t=inp.value.replace(/,/g," ").trim();if(!t)return;
+  readForm();const d=S.edit.doc;if(!d.tags.some(x=>fold(x)===fold(t)))d.tags.push(t);inp.value="";drawEditor();$("#tagIn")?.focus();
+}
+function summaryFromFields(d){
+  return Letter.buildSummary({sender:d.sender,subject:d.subject,date:d.letterDate,keySentence:S.edit?.key||null,deadline:d.deadline||null,deadlineKind:d.deadlineKind||"Frist",
+    deadlineEstimated:!!S.edit?.est&&!!d.deadline,amount:d.amount,amountKind:S.edit?.amountKind||null,ref:d.ref?{label:d.refLabel||"Aktenzeichen",value:d.ref}:null});
+}
+function applyParsed(p,force){
+  const d=S.edit.doc,set=(k,v)=>{if(v!=null&&v!==""&&(force||!d[k]))d[k]=v};
+  set("letterDate",p.date);set("sender",p.sender);set("subject",p.subject);
+  if(p.ref){if(force||!d.ref){d.ref=p.ref.value;d.refLabel=p.ref.label}}
+  if(p.amount!=null&&(force||d.amount==null))d.amount=p.amount;
+  if(p.deadline&&(force||!d.deadline)){d.deadline=p.deadline;d.deadlineKind=p.deadlineKind;S.edit.est=p.deadlineEstimated}
+  if(p.category&&(force||!d.category))d.category=p.category;
+  for(const t of p.tags||[])if(!d.tags.some(x=>fold(x)===fold(t)))d.tags.push(t);
+  S.edit.key=p.keySentence;S.edit.amountKind=p.amountKind;
+  if(force||!d.summary)d.summary=p.summary;
+  if(d.deadline&&d.status==="neu")d.status="todo";
+}
+function parseCtx(){return {today:today(),categories:S.settings.categories,senders:knownSenders(),tags:knownTags()}}
+async function runOcr(input){
+  const E=S.edit;E.ocrBusy=true;E.ocrMsg="Texterkennung startet … (beim ersten Mal etwas länger)";setStatus(E.ocrMsg);
+  let text="";
+  try{text=await readText(input)}catch(e){if(S.edit===E){E.ocrBusy=false;setStatus("Texterkennung nicht verfügbar (offline?). Bitte Felder selbst ausfüllen.",true)}return}
+  if(S.edit!==E)return;
+  E.ocrBusy=false;
+  readForm();E.doc.text=text.trim();
+  const p=Letter.parseLetter(text,parseCtx());applyParsed(p,false);
+  const got=[p.sender&&"Absender",p.subject&&"Betreff",p.date&&"Datum",p.deadline&&"Frist",p.ref&&"Aktenzeichen",p.amount!=null&&"Betrag"].filter(Boolean);
+  drawEditor();
+  setStatus(got.length?`Erkannt: ${got.join(", ")}. Bitte kurz prüfen.`:"Nichts sicher erkannt. Bitte Felder ausfüllen.");
+  const dup=findDuplicate(E.doc);if(dup)setStatus(`Achtung: Ein ähnlicher Brief ist schon gespeichert (${dup.sender||""}, ${dfmt(dup.letterDate)}).`,true);
+}
+function findDuplicate(d){return live().find(x=>x.id!==d.id&&x.letterDate&&x.letterDate===d.letterDate&&fold(x.sender)===fold(d.sender)&&(fold(x.subject)===fold(d.subject)||(x.ref&&x.ref===d.ref)))}
+async function editorClick(e){
+  const b=e.target.closest("[data-act]");if(!b)return;const E=S.edit;
+  switch(b.dataset.act){
+    case "cancel":if(E.mode==="new"&&!confirm("Brief verwerfen?"))return;closeSheet();return;
+    case "tagdel":readForm();E.doc.tags.splice(+b.dataset.i,1);return drawEditor();
+    case "tagadd":readForm();E.doc.tags.push(b.dataset.t);return drawEditor();
+    case "st":readForm();E.doc.status=b.dataset.s;return drawEditor();
+    case "resum":readForm();E.doc.summary=summaryFromFields(E.doc);return drawEditor();
+    case "reparse":{readForm();const p=Letter.parseLetter(E.doc.text,parseCtx());applyParsed(p,true);drawEditor();setStatus("Felder aus dem Text neu gelesen.");return}
+    case "save":{
+      addTagFromInput();readForm();const d=E.doc;
+      if(E.ocrBusy&&!confirm("Die Texterkennung läuft noch. Trotzdem speichern? Der Text fehlt dann für die Suche."))return;
+      if(!d.sender&&!d.subject){setStatus("Bitte mindestens Absender oder Betreff angeben.",true);return}
+      if(!d.category)d.category=catNames()[catNames().length-1];
+      if(d.deadline&&!d.deadlineKind)d.deadlineKind="Frist";
+      b.disabled=true;
+      if(E.mode==="new"){
+        d.fileId=await storeFile(E.pdf,fileName(d));
+        if(E.thumb)d.thumbId=await storeFile(E.thumb,"vorschau.jpg");
+      }
+      d.updatedAt=new Date().toISOString();
+      await dbPut("docs",d);
+      const i=S.docs.findIndex(x=>x.id===d.id);if(i>=0)S.docs[i]=d;else S.docs.push(d);
+      closeSheet();render();toast(E.mode==="new"?"Brief gespeichert":"Gespeichert");scheduleSync();
+      if(E.mode==="new"&&S.settings.calOn&&d.deadline&&!S.settings.driveLinked)toast("Für die Kalender-Erinnerung zuerst mit Google verbinden");
+      return;
+    }
+  }
+}
+
+/* ================= Ansicht ================= */
+async function openView(id){
+  const d=S.docs.find(x=>x.id===id);if(!d)return;
+  S.edit={mode:"view",id,urls:[]};
+  const u=await thumbUrl(d);const i=dueInfo(d);
+  const kv=[["Briefdatum",dfmt(d.letterDate)],["Kategorie",d.category],[d.refLabel||"Aktenzeichen",d.ref],["Betrag",d.amount!=null?eur(d.amount):""],
+    ["Frist",d.deadline?`${dfmt(d.deadline)} (${esc(d.deadlineKind||"Frist")})${i?` · ${i.text}`:""}${d.calId?" · im Kalender":""}`:""],["Seiten",d.pages||""],["Notiz",d.note],
+    ["Ablage",d.driveId?`<a href="${esc(d.url)}" target="_blank" rel="noopener">Google Drive</a> · ${esc(d.category)} / ${esc(docDate(d).slice(0,4))}`:(S.settings.driveLinked?"wird hochgeladen …":"nur auf diesem Handy")]]
+    .filter(([,v])=>v!==""&&v!=null);
+  sheet(d.sender||"Dokument",`
+    <div class="sec hero"><div class="snd">${esc(d.sender||"")}</div><div class="sbj">${esc(d.subject||"Ohne Betreff")}</div>
+      ${(d.tags||[]).length?`<div class="btnrow" style="gap:6px">${d.tags.map(t=>`<button type="button" class="tag" style="border:0" data-act="tagsearch" data-t="${esc(t)}">${esc(t)}</button>`).join("")}</div>`:""}</div>
+    <div class="sec"><h3>Status</h3><div class="seg">${Object.entries(STATUS).map(([k,l])=>`<button type="button" class="${k}" data-act="st" data-s="${k}" aria-pressed="${d.status===k}">${l}</button>`).join("")}</div></div>
+    ${d.summary?`<div class="sec"><h3>Kurzinfo</h3><div class="summary">${esc(d.summary)}</div></div>`:""}
+    <div class="sec"><div class="kv">${kv.map(([k,v])=>`<span class="k">${esc(k)}</span><span class="v">${k==="Ablage"||k==="Frist"?v:esc(v)}</span>`).join("")}</div></div>
+    ${u?`<div class="sec"><button type="button" data-act="open" style="border:0;padding:0;background:none"><img class="thumb" src="${u}" alt="Dokument öffnen"></button></div>`:""}
+    <div class="sec"><div class="btnrow"><button type="button" class="btn primary" data-act="open">Dokument öffnen</button><button type="button" class="btn" data-act="share">Teilen</button><button type="button" class="btn" data-act="edit">Bearbeiten</button></div></div>
+    ${d.text?`<div class="sec"><details><summary class="status">Erkannter Text</summary><div class="status" style="white-space:pre-wrap;margin-top:8px;font-size:12.5px">${esc(d.text)}</div></details></div>`:""}
+    <div class="sec"><div class="btnrow"><button type="button" class="btn danger" data-act="del">Löschen</button></div></div>
+  `,`<button type="button" class="btn" data-act="close">Schließen</button>`);
+  $("#scrim").addEventListener("click",async e=>{
+    const b=e.target.closest("[data-act]");if(!b)return;
+    switch(b.dataset.act){
+      case "close":return closeSheet();
+      case "open":return openLocalFile(d);
+      case "share":return shareDoc(d);
+      case "edit":return openEdit(d);
+      case "tagsearch":closeSheet();$("#q").value=b.dataset.t;$("#qClear").hidden=false;S.q=b.dataset.t;return render();
+      case "st":d.status=b.dataset.s;d.updatedAt=new Date().toISOString();await dbPut("docs",d);render();scheduleSync();return openView(d.id);
+      case "del":{
+        if(!confirm("Dokument löschen? Die Datei in Google Drive kommt in den Papierkorb."))return;
+        S.deleted[d.id]=new Date().toISOString();await dbPut("meta",{key:"deleted",items:S.deleted});
+        if(d.driveId)S.trash.push({kind:"file",id:d.driveId});if(d.calId)S.trash.push({kind:"cal",id:d.calId});
+        await dbPut("meta",{key:"trash",items:S.trash});
+        S.docs=S.docs.filter(x=>x.id!==d.id);await dbDel("docs",d.id);
+        for(const fid of [d.fileId,d.thumbId])if(fid)await dbDel("files",fid).catch(()=>{});
+        closeSheet();render();toast("Gelöscht");scheduleSync();return;
+      }
+    }
+  });
+}
+
+/* ================= Einstellungen & Sicherung ================= */
+async function saveSettings(){S.settings.updatedAt=new Date().toISOString();await dbPut("meta",{key:"settings",...S.settings});scheduleSync()}
+function openSettings(){
+  const s=S.settings;S.edit={mode:"settings",urls:[]};
+  const catRows=s.categories.map((c,i)=>`<div class="catrow">
+      <label class="f">Name<input id="cn${i}" value="${esc(c.name)}"></label>
+      <label class="f">Stichwörter (mit Komma getrennt)<textarea id="ck${i}" rows="2">${esc((c.keywords||[]).join(", "))}</textarea></label></div>`).join("");
+  sheet("Einstellungen",`
+    <div id="edStatus" class="status" style="margin-top:10px"></div>
+    <div class="sec"><h3>Google Drive</h3>
+      <p class="status" style="margin:0">${s.driveLinked
+        ?"Alle Briefe liegen als PDF im Drive-Ordner „Dokumente“, sortiert nach Kategorie und Jahr. Jeden Tag kommt eine datierte Sicherung nach „_App-Daten/Sicherungen“."+(s.lastSnapshot?" Letzte: "+dfmt(s.lastSnapshot)+".":"")
+        :"Nach dem Verbinden liegen alle Briefe als PDF im Drive-Ordner „Dokumente“."}</p>
+      <p class="status" id="driveStatus" style="margin:0;font-weight:600"></p>
+      <div class="btnrow">${s.driveLinked
+        ?`<button type="button" class="btn primary" data-act="sync">Jetzt abgleichen</button><button type="button" class="btn" data-act="unlink">Drive trennen</button>`
+        :`<button type="button" class="btn primary" data-act="link">Mit Google Drive verbinden</button>`}</div>
+      <details><summary class="status">Verlauf anzeigen</summary><pre class="status" style="white-space:pre-wrap;margin:6px 0 0;font-size:12px">${esc((()=>{try{return JSON.parse(localStorage.getItem("glog")||"[]").join("\n")}catch{return ""}})()||"Noch keine Einträge.")}</pre></details></div>
+    <div class="sec"><h3>Fristen</h3>
+      <p class="status" style="margin:0">${s.calOn
+        ?"Jede Frist steht als ganztägiger Termin in deinem Google Kalender, mit Erinnerung."+(G.calErr?" <b>Kalender ist gerade nicht erreichbar.</b>":"")
+        :"Optional: Fristen als Termin mit Erinnerung in den Google Kalender eintragen. Erledigte Briefe werden dort wieder entfernt."}</p>
+      <div class="grid2">${field("Erinnerung (Tage vorher)","remD",s.remindDays??3,"number","",'min="1" max="27"')}${field("„Bald fällig“ ab (Tage)","soonD",s.soonDays??14,"number","",'min="1" max="90"')}</div>
+      <div class="btnrow">${s.calOn?`<button type="button" class="btn" data-act="caloff">Kalender ausschalten</button>`:`<button type="button" class="btn" data-act="calon">Google Kalender einbinden</button>`}</div></div>
+    <div class="sec"><h3>Kategorien</h3>
+      <p class="status" style="margin:0">Die App schlägt die Kategorie vor, in der die meisten Stichwörter im Brief vorkommen. Neue Kategorie = neuer Ordner in Drive.</p>
+      ${catRows}<div class="btnrow"><button type="button" class="btn" data-act="addcat">Kategorie hinzufügen</button></div></div>
+    <div class="sec"><h3>Sicherung als Datei</h3>
+      <p class="status" style="margin:0">Enthält alle Angaben und den erkannten Text, ohne PDFs.${s.lastBackup?` Letzte: ${dfmt(s.lastBackup.slice(0,10))}.`:""}</p>
+      <div class="btnrow"><button type="button" class="btn" data-act="backup">Sicherung erstellen</button><button type="button" class="btn" data-act="restore">Sicherung einspielen</button></div></div>
+  `,`<button type="button" class="btn" data-act="close">Abbrechen</button><button type="button" class="btn primary" data-act="save">Speichern</button>`);
+  updateChip();
+  $("#scrim").addEventListener("click",async e=>{
+    const b=e.target.closest("[data-act]");if(!b)return;
+    switch(b.dataset.act){
+      case "close":return closeSheet();
+      case "link":closeSheet();return connectDrive();
+      case "unlink":S.settings.driveLinked=false;G.token=null;try{localStorage.removeItem("gtok")}catch{};await dbPut("meta",{key:"settings",...S.settings});closeSheet();render();updateChip();return toast("Drive getrennt. Die Dateien bleiben in Drive.");
+      case "sync":if(!tokenValid()){closeSheet();return connectDrive(true)}await syncNow();return openSettings();
+      case "calon":collectSettings();S.settings.calOn=true;await saveSettings();closeSheet();return connectDrive(false);
+      case "caloff":collectSettings();S.settings.calOn=false;await saveSettings();return openSettings();
+      case "addcat":collectSettings();S.settings.categories.push({name:"Neue Kategorie",keywords:[]});return openSettings();
+      case "backup":return makeBackup();
+      case "restore":{const p=$("#pickBackup");p.value="";p.onchange=()=>{const f=p.files[0];if(f)restoreBackup(f)};p.click();return}
+      case "save":{
+        const old=S.settings.categories.map(c=>c.name);collectSettings();
+        // Umbenannte Kategorien in den Dokumenten nachziehen
+        const now=S.settings.categories.map(c=>c.name);
+        for(let i=0;i<Math.min(old.length,now.length);i++)if(old[i]!==now[i])for(const d of S.docs)if(d.category===old[i]){d.category=now[i];d.updatedAt=new Date().toISOString();await dbPut("docs",d)}
+        await saveSettings();closeSheet();render();return toast("Gespeichert");
+      }
+    }
+  });
+}
+function collectSettings(){
+  const s=S.settings;
+  s.categories=s.categories.map((c,i)=>({name:($("#cn"+i)?.value??c.name).trim().replace(/[\\:*?"<>|#%]+/g," ")||c.name,
+    keywords:($("#ck"+i)?.value??(c.keywords||[]).join(",")).split(",").map(x=>x.trim()).filter(Boolean)})).filter(c=>c.name);
+  const n=(id,def,min,max)=>{const v=+($("#"+id)?.value);return v>=min&&v<=max?Math.round(v):def};
+  s.remindDays=n("remD",s.remindDays??3,1,27);s.soonDays=n("soonD",s.soonDays??14,1,90);
+}
+function blobToB64(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=rej;r.readAsDataURL(blob)})}
+function exportData(){
+  const shared=Object.fromEntries(Object.entries(S.settings).filter(([k])=>!LOCAL_KEYS.includes(k)&&k!=="updatedAt"));
+  return {app:"dokumente",version:1,updatedAt:new Date().toISOString(),settings:shared,settingsUpdatedAt:S.settings.updatedAt||null,docs:S.docs.map(stripLocal),deleted:S.deleted};
+}
+async function makeBackup(){
+  const blob=new Blob([JSON.stringify(exportData(),null,1)],{type:"application/json"});const name=`Dokumente_Sicherung_${today()}.json`;
+  const file=new File([blob],name,{type:"application/json"});
+  if(navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:name})}catch{}}
+  else{const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),5000)}
+  S.settings.lastBackup=new Date().toISOString();await dbPut("meta",{key:"settings",...S.settings});
+}
+async function restoreBackup(file){
+  try{const d=JSON.parse(await file.text());if(d.app!=="dokumente"||!Array.isArray(d.docs))throw new Error("Keine Sicherung dieser App.");
+    if(!confirm(`${d.docs.length} Dokumente aus der Sicherung übernehmen? Neuere Angaben auf dem Handy bleiben erhalten.`))return;
+    const map=new Map(S.docs.map(x=>[x.id,x]));
+    for(const r of d.docs){const l=map.get(r.id);if(!l||(r.updatedAt||"")>(l.updatedAt||"")){const m={...r};if(l){m.fileId=l.fileId;m.thumbId=l.thumbId}map.set(r.id,m);await dbPut("docs",m)}}
+    S.docs=[...map.values()];if(d.settings?.categories)S.settings.categories=d.settings.categories;await saveSettings();
+    closeSheet();render();toast(`${d.docs.length} Dokumente eingespielt`);scheduleSync();
+  }catch(err){setStatus("Einspielen fehlgeschlagen: "+(err?.message||err),true)}
+}
+
+/* ================= Texterkennung und Scanner (aus der Arztrechnungen-App) ================= */
+const TESS="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+let tessWorker=null;
+function loadScript(src){return new Promise((res,rej)=>{if(window.Tesseract)return res();const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=()=>rej(new Error("load"));document.head.appendChild(s)})}
+async function ensureTess(){
+  await loadScript(TESS);
+  if(!tessWorker)tessWorker=await Tesseract.createWorker("deu",1,{logger:m=>{if(m.status==="recognizing text")setStatus(`Wird gelesen … ${Math.round(m.progress*100)} %`)}});
+}
+function loadLib(src,test){return new Promise((res,rej)=>{if(test())return res();const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=()=>rej(new Error("load"));document.head.appendChild(s)})}
+async function prepareForOcr(file){
+  try{
+    const bmp=await createImageBitmap(file);const sc=Math.min(1,2600/Math.max(bmp.width,bmp.height));
+    const w=Math.round(bmp.width*sc),h=Math.round(bmp.height*sc);
+    const cv=document.createElement("canvas");cv.width=w;cv.height=h;const ctx=cv.getContext("2d",{willReadFrequently:true});
+    ctx.drawImage(bmp,0,0,w,h);
+    const bg=document.createElement("canvas");bg.width=w;bg.height=h;const bx=bg.getContext("2d",{willReadFrequently:true});
+    bx.filter=`blur(${Math.round(Math.max(w,h)/80)}px)`;bx.drawImage(cv,0,0);
+    const a=ctx.getImageData(0,0,w,h),b=bx.getImageData(0,0,w,h),d=a.data,e=b.data;
+    if(e[0]===d[0]&&e[1]===d[1]&&e[w*4*Math.floor(h/2)]===d[w*4*Math.floor(h/2)]){} // Weichzeichnen evtl. nicht unterstützt
+    for(let i=0;i<d.length;i+=4){
+      const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2],bgv=Math.max(1,0.299*e[i]+0.587*e[i+1]+0.114*e[i+2]);
+      const v=Math.min(255,g/bgv*255);d[i]=d[i+1]=d[i+2]=v;
+    }
+    ctx.putImageData(a,0,0);
+    return await new Promise(r=>cv.toBlob(x=>r(x||file),"image/png"));
+  }catch{return shrink(file,2000,0.9)}
+}
+// Liefert {pdf, images:[Blob], file?} oder null (abgebrochen). Datei-Auswahl (z. B. PDF) wird unverändert durchgereicht.
+function scanDocument(title){
+  return new Promise(resolve=>{
+    const SC={title,pages:[],cur:null,resolve,done:false};
+    S.scan=SC;drawScanStart();
+  });
+}
+function scanFinish(result){const SC=S.scan;if(!SC||SC.done)return;SC.done=true;S.scan=null;$("#sheetHost").innerHTML="";SC.resolve(result)}
+function drawScanStart(){
+  const SC=S.scan;const n=SC.pages.length;
+  $("#sheetHost").innerHTML=`<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-label="Scannen">
+    <div class="sheet-head"><h2>${esc(SC.title)}</h2><div class="btnrow"><button type="button" class="btn" data-act="scancancel">Abbrechen</button>${n?`<button type="button" class="btn primary" data-act="scandone">Fertig (${n} Seite${n===1?"":"n"})</button>`:""}</div></div>
+    ${n?`<div class="sec"><h3>Gescannte Seiten</h3><div class="thumbs">${SC.pages.map((p,i)=>`<div class="pg"><img src="${p.url}" alt="Seite ${i+1}"><button type="button" class="btn link" data-act="scandel" data-i="${i}">Entfernen</button></div>`).join("")}</div></div>`:""}
+    <div class="sec">
+      <div class="btnrow"><button type="button" class="btn primary" data-act="scancam">${n?"Weitere Seite fotografieren":"Foto aufnehmen"}</button>
+      ${n?"":`<button type="button" class="btn" data-act="scanfile">Datei oder PDF wählen</button>`}</div>
+      <p class="status" style="margin:0">Leg das Blatt auf eine dunkle Unterlage. Die App findet die Ränder, richtet das Blatt gerade aus und entfernt Schatten.</p>
+    </div></div></div>`;
+  $("#scrim").addEventListener("click",async e=>{
+    const b=e.target.closest("[data-act]");if(!b)return;const act=b.dataset.act;
+    if(act==="scancancel"){S.scan.pages.forEach(p=>URL.revokeObjectURL(p.url));return scanFinish(null)}
+    if(act==="scandone")return finishScanPdf();
+    if(act==="scandel"){const p=S.scan.pages.splice(+b.dataset.i,1)[0];URL.revokeObjectURL(p.url);return drawScanStart()}
+    if(act==="scanfile"){const p=$("#pick");p.value="";p.onchange=()=>{const f=p.files[0];if(f)scanFinish({file:f})};p.click();return}
+    if(act==="scancam"){const c=$("#cam");c.value="";c.onchange=()=>{const f=c.files[0];if(f)scanLoad(f)};c.click()}
+  });
+}
+async function scanLoad(file){
+  let bmp;try{bmp=await createImageBitmap(file)}catch{toast("Foto konnte nicht geöffnet werden");return}
+  const sc=Math.min(1,4000/Math.max(bmp.width,bmp.height));const w=Math.round(bmp.width*sc),h=Math.round(bmp.height*sc);
+  const src=document.createElement("canvas");src.width=w;src.height=h;src.getContext("2d").drawImage(bmp,0,0,w,h);
+  S.scan.cur={src,w,h,quad:detectQuad(src)};drawScanEdit();
+}
+// Blatt finden: hellste zusammenhängende Fläche (Otsu-Schwelle), Ecken über Extrempunkte
+function detectQuad(src){
+  const W=360,sc=W/Math.max(src.width,src.height),w=Math.max(1,Math.round(src.width*sc)),h=Math.max(1,Math.round(src.height*sc));
+  const c=document.createElement("canvas");c.width=w;c.height=h;const x=c.getContext("2d",{willReadFrequently:true});x.filter="blur(2px)";x.drawImage(src,0,0,w,h);
+  const d=x.getImageData(0,0,w,h).data,g=new Uint8Array(w*h),hist=new Array(256).fill(0);
+  for(let i=0;i<w*h;i++){const v=(d[i*4]*0.299+d[i*4+1]*0.587+d[i*4+2]*0.114)|0;g[i]=v;hist[v]++}
+  let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];let sB=0,wB=0,best=0,th=128;
+  for(let t=0;t<256;t++){wB+=hist[t];if(!wB)continue;const wF=w*h-wB;if(!wF)break;sB+=t*hist[t];const mB=sB/wB,mF=(sum-sB)/wF,v=wB*wF*(mB-mF)**2;if(v>best){best=v;th=t}}
+  const lab=new Int32Array(w*h);let bestLab=0,bestSize=0,cur=0;const st=[];
+  for(let i=0;i<w*h;i++){if(g[i]<=th||lab[i])continue;cur++;let size=0;st.push(i);lab[i]=cur;
+    while(st.length){const p=st.pop();size++;const px=p%w,py=(p/w)|0;
+      for(const q of [px>0?p-1:-1,px<w-1?p+1:-1,py>0?p-w:-1,py<h-1?p+w:-1])if(q>=0&&!lab[q]&&g[q]>th){lab[q]=cur;st.push(q)}}
+    if(size>bestSize){bestSize=size;bestLab=cur}}
+  const full=[[0.03,0.03],[0.97,0.03],[0.97,0.97],[0.03,0.97]].map(([a,b])=>[a*src.width,b*src.height]);
+  if(bestSize<w*h*0.15)return full;
+  let tl=[0,0,1e9],tr=[0,0,-1e9],br=[0,0,-1e9],bl=[0,0,1e9];
+  for(let i=0;i<w*h;i++){if(lab[i]!==bestLab)continue;const px=i%w,py=(i/w)|0;
+    if(px+py<tl[2])tl=[px,py,px+py];if(px+py>br[2])br=[px,py,px+py];if(px-py>tr[2])tr=[px,py,px-py];if(px-py<bl[2])bl=[px,py,px-py]}
+  return [tl,tr,br,bl].map(([px,py])=>[px/sc,py/sc]);
+}
+function drawScanEdit(){
+  const SC=S.scan,cur=SC.cur;
+  $("#sheetHost").innerHTML=`<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-label="Ränder anpassen">
+    <div class="sheet-head"><h2>Ränder prüfen</h2><div class="btnrow"><button type="button" class="btn" data-act="scanback">Zurück</button><button type="button" class="btn primary" data-act="scanok">Übernehmen</button></div></div>
+    <p class="status" style="margin:10px 0 0">Zieh die Ecken auf die Ecken des Blatts.</p>
+    <div class="scanwrap"><canvas id="scanCv"></canvas></div>
+    <div class="btnrow"><button type="button" class="btn" data-act="scanfull">Ganzes Foto verwenden</button><button type="button" class="btn" data-act="scanauto">Ränder neu suchen</button></div>
+  </div></div>`;
+  const cv=$("#scanCv"),maxW=Math.min(window.innerWidth-40,700),maxH=window.innerHeight*0.6;
+  const k=Math.min(maxW/cur.w,maxH/cur.h);cv.width=Math.round(cur.w*k);cv.height=Math.round(cur.h*k);cur.k=k;
+  const ctx=cv.getContext("2d");
+  const paint=()=>{ctx.drawImage(cur.src,0,0,cv.width,cv.height);const q=cur.quad.map(([x,y])=>[x*k,y*k]);
+    ctx.fillStyle="rgba(22,58,107,.18)";ctx.strokeStyle="#7fb2e8";ctx.lineWidth=3;ctx.beginPath();q.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.fill();ctx.stroke();
+    for(const [x,y] of q){ctx.beginPath();ctx.arc(x,y,13,0,7);ctx.fillStyle="rgba(255,255,255,.9)";ctx.fill();ctx.lineWidth=3;ctx.stroke()}};
+  paint();
+  let drag=-1;
+  const pos=e=>{const r=cv.getBoundingClientRect();return [(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height]};
+  cv.addEventListener("pointerdown",e=>{const [x,y]=pos(e);let bd=40;cur.quad.forEach(([qx,qy],i)=>{const dd=Math.hypot(qx*k-x,qy*k-y);if(dd<bd){bd=dd;drag=i}});if(drag>=0){cv.setPointerCapture(e.pointerId);e.preventDefault()}});
+  cv.addEventListener("pointermove",e=>{if(drag<0)return;const [x,y]=pos(e);cur.quad[drag]=[Math.max(0,Math.min(cur.w,x/k)),Math.max(0,Math.min(cur.h,y/k))];paint()});
+  const up=()=>{drag=-1};cv.addEventListener("pointerup",up);cv.addEventListener("pointercancel",up);
+  $("#scrim").addEventListener("click",async e=>{
+    const b=e.target.closest("[data-act]");if(!b)return;const act=b.dataset.act;
+    if(act==="scanback"){SC.cur=null;return drawScanStart()}
+    if(act==="scanfull"){cur.quad=[[0,0],[cur.w,0],[cur.w,cur.h],[0,cur.h]];return paint()}
+    if(act==="scanauto"){cur.quad=detectQuad(cur.src);return paint()}
+    if(act==="scanok"){b.disabled=true;b.textContent="Wird aufbereitet …";await new Promise(r=>setTimeout(r,30));
+      const out=enhanceScan(warpQuad(cur.src,cur.quad));
+      // volle Auflösung für die Texterkennung, verkleinert für die PDF
+      const ocrBlob=await new Promise(r=>out.toBlob(r,"image/jpeg",0.9));
+      const ps=Math.min(1,2200/Math.max(out.width,out.height)),pw=Math.round(out.width*ps),ph=Math.round(out.height*ps);
+      const small=document.createElement("canvas");small.width=pw;small.height=ph;small.getContext("2d").drawImage(out,0,0,pw,ph);
+      const blob=await new Promise(r=>small.toBlob(r,"image/jpeg",0.82));
+      SC.pages.push({blob,ocrBlob,w:pw,h:ph,url:URL.createObjectURL(blob)});SC.cur=null;drawScanStart()}
+  });
+}
+// Perspektive entzerren (Quadrat -> Viereck, Heckbert), bilinear abtasten
+function warpQuad(src,quad){
+  const [[x0,y0],[x1,y1],[x2,y2],[x3,y3]]=quad;
+  let W=Math.max(Math.hypot(x1-x0,y1-y0),Math.hypot(x2-x3,y2-y3)),H=Math.max(Math.hypot(x3-x0,y3-y0),Math.hypot(x2-x1,y2-y1));
+  const sc=Math.min(1,3200/Math.max(W,H));W=Math.max(10,Math.round(W*sc));H=Math.max(10,Math.round(H*sc));
+  const sx=x0-x1+x2-x3,sy=y0-y1+y2-y3;let a,b,c,d,e,f,g=0,h=0;
+  if(Math.abs(sx)<1e-6&&Math.abs(sy)<1e-6){a=x1-x0;b=x3-x0;c=x0;d=y1-y0;e=y3-y0;f=y0}
+  else{const dx1=x1-x2,dx2=x3-x2,dy1=y1-y2,dy2=y3-y2,den=dx1*dy2-dx2*dy1;g=(sx*dy2-dx2*sy)/den;h=(dx1*sy-sx*dy1)/den;
+    a=x1-x0+g*x1;b=x3-x0+h*x3;c=x0;d=y1-y0+g*y1;e=y3-y0+h*y3;f=y0}
+  const sw=src.width,shh=src.height,sd=src.getContext("2d",{willReadFrequently:true}).getImageData(0,0,sw,shh).data;
+  const out=document.createElement("canvas");out.width=W;out.height=H;const oc=out.getContext("2d");const od=oc.createImageData(W,H),o=od.data;
+  for(let j=0;j<H;j++){const v=j/(H-1);for(let i=0;i<W;i++){const u=i/(W-1),den=g*u+h*v+1;
+    let X=(a*u+b*v+c)/den,Y=(d*u+e*v+f)/den;if(X<0)X=0;if(Y<0)Y=0;if(X>sw-1.001)X=sw-1.001;if(Y>shh-1.001)Y=shh-1.001;
+    const xi=X|0,yi=Y|0,fx=X-xi,fy=Y-yi,p=(yi*sw+xi)*4,q=p+sw*4,t=(j*W+i)*4;
+    for(let ch=0;ch<3;ch++){o[t+ch]=(sd[p+ch]*(1-fx)+sd[p+4+ch]*fx)*(1-fy)+(sd[q+ch]*(1-fx)+sd[q+4+ch]*fx)*fy}o[t+3]=255}}
+  oc.putImageData(od,0,0);return out;
+}
+// Scan-Look: Graustufen, Licht ausgleichen, Papier weiß, Schrift kräftig
+function enhanceScan(cv){
+  const w=cv.width,h=cv.height,ctx=cv.getContext("2d",{willReadFrequently:true});
+  const bg=document.createElement("canvas");bg.width=w;bg.height=h;const bx=bg.getContext("2d",{willReadFrequently:true});
+  bx.filter=`blur(${Math.round(Math.max(w,h)/60)}px)`;bx.drawImage(cv,0,0);
+  const a=ctx.getImageData(0,0,w,h),d=a.data,e=bx.getImageData(0,0,w,h).data;
+  for(let i=0;i<d.length;i+=4){
+    const gv=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2],bv=Math.max(1,0.299*e[i]+0.587*e[i+1]+0.114*e[i+2]);
+    let v=gv/bv*255;v=v>=245?255:v*0.98;d[i]=d[i+1]=d[i+2]=v>255?255:v;
+  }
+  ctx.putImageData(a,0,0);return cv;
+}
+async function finishScanPdf(){
+  const SC=S.scan;const pages=[];
+  for(const p of SC.pages)pages.push({jpg:new Uint8Array(await p.blob.arrayBuffer()),w:p.w,h:p.h});
+  const pdf=jpegsToPdf(pages);const images=SC.pages.map(p=>p.ocrBlob||p.blob);
+  SC.pages.forEach(p=>URL.revokeObjectURL(p.url));
+  scanFinish({pdf,images});
+}
+// Texterkennung für Scan-Ergebnis (Bilder sind schon aufbereitet) oder Datei
+async function readText(input){
+  if(input.images){await ensureTess();let t="";for(const im of input.images)t+=(await tessRec(im))+"\n";return t}
+  return docText(input.file||input);
+}
+
+const PDFJS="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js";
+// Texterkennung eines Bildes; Wörter mit Position werden für Ausschnitte (Ampel) gesammelt
+async function tessRec(img){
+  let res;try{res=await tessWorker.recognize(img,{},{text:true,blocks:true})}catch{res=await tessWorker.recognize(img)}
+  const d=res?.data||{};
+  if(S.ocrCap){let words=d.words;if(!words?.length&&d.blocks)words=d.blocks.flatMap(b=>(b.paragraphs||[]).flatMap(p=>(p.lines||[]).flatMap(l=>l.words||[])));
+    S.ocrCap.push({img,words:(words||[]).map(w=>({text:w.text||"",b:w.bbox}))})}
+  return d.text||"";
+}
+async function docText(file){
+  if(file.type==="application/pdf"||/\.pdf$/i.test(file.name||"")){
+    await loadLib(PDFJS,()=>!!window.pdfjsLib);
+    pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+    const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+    let text="";const pages=Math.min(pdf.numPages,12);
+    for(let p=1;p<=pages;p++){
+      const page=await pdf.getPage(p);const tc=await page.getTextContent();
+      // Textstücke zu Zeilen zusammensetzen (gleiche Höhe)
+      const rows=new Map();for(const it of tc.items){const y=Math.round(it.transform[5]);const r=rows.get(y)||[];r.push([it.transform[4],it.str]);rows.set(y,r)}
+      let pt=[...rows.entries()].sort((a,b)=>b[0]-a[0]).map(([,r])=>r.sort((a,b)=>a[0]-b[0]).map(x=>x[1]).join(" ")).join("\n");
+      if(pt.replace(/\s/g,"").length<40){ // gescanntes PDF: Seite als Bild lesen
+        const vp=page.getViewport({scale:2.2});const cv=document.createElement("canvas");cv.width=vp.width;cv.height=vp.height;
+        await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
+        await ensureTess();const bl=await prepareForOcr(await new Promise(r=>cv.toBlob(r,"image/png")));pt=await tessRec(bl);
+      }
+      text+=pt+"\n";
+    }
+    return text;
+  }
+  await ensureTess();return await tessRec(await prepareForOcr(file));
+}
+async function toPdf(blob){
+  if(blob.type==="application/pdf")return blob;
+  const bmp=await createImageBitmap(blob);const sc=Math.min(1,2000/Math.max(bmp.width,bmp.height));
+  const w=Math.round(bmp.width*sc),h=Math.round(bmp.height*sc);
+  const cv=document.createElement("canvas");cv.width=w;cv.height=h;const ctx=cv.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,w,h);ctx.drawImage(bmp,0,0,w,h);
+  const jpg=new Uint8Array(await (await new Promise(r=>cv.toBlob(r,"image/jpeg",0.85))).arrayBuffer());
+  return jpegToPdf(jpg,w,h);
+}
+function jpegToPdf(jpg,w,h){return jpegsToPdf([{jpg,w,h}])}
+function jpegsToPdf(pages){
+  const enc=new TextEncoder(),parts=[],off=[];let pos=0;
+  const push=x=>{const b=typeof x==="string"?enc.encode(x):x;parts.push(b);pos+=b.length};
+  const pw=595.28,ph=841.89,n=pages.length;
+  push(new Uint8Array([37,80,68,70,45,49,46,52,10,37,226,227,207,211,10]));
+  const obj=(i,body)=>{off[i]=pos;push(`${i} 0 obj\n${body}\nendobj\n`)};
+  obj(1,"<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2,`<< /Type /Pages /Kids [${pages.map((_,i)=>`${3+i*3} 0 R`).join(" ")}] /Count ${n} >>`);
+  pages.forEach((p,i)=>{
+    const po=3+i*3,io=po+1,co=po+2;
+    const s=Math.min(pw/p.w,ph/p.h),dw=+(p.w*s).toFixed(2),dh=+(p.h*s).toFixed(2),x=+((pw-dw)/2).toFixed(2),y=+((ph-dh)/2).toFixed(2);
+    const content=`q ${dw} 0 0 ${dh} ${x} ${y} cm /Im0 Do Q`;
+    obj(po,`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 ${io} 0 R >> >> /Contents ${co} 0 R >>`);
+    off[io]=pos;push(`${io} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /${p.gray?"DeviceGray":"DeviceRGB"} /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.jpg.length} >>\nstream\n`);push(p.jpg);push("\nendstream\nendobj\n");
+    obj(co,`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+  });
+  const total=3+n*3,xref=pos;let t=`xref\n0 ${total}\n0000000000 65535 f \n`;for(let i=1;i<total;i++)t+=String(off[i]).padStart(10,"0")+" 00000 n \n";
+  push(t+`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts,{type:"application/pdf"});
+}
+
+/* ================= Google Drive und Kalender ================= */
+const GOOGLE_CLIENT_ID="592336920931-5s1klnrs64841o02016jk7mknm248rdf.apps.googleusercontent.com";
+const DRIVE_SCOPE="https://www.googleapis.com/auth/drive.file",CAL_SCOPE="https://www.googleapis.com/auth/calendar.events";
+const API="https://www.googleapis.com/drive/v3/files",UPLOAD="https://www.googleapis.com/upload/drive/v3/files",CAL="https://www.googleapis.com/calendar/v3/calendars/primary/events";
+const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente";
+const G={token:null,exp:0,busy:false,dirty:false,last:null,err:null,timer:null,calErr:false};
+const LOCAL_KEYS=["driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn"];
+try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()){G.token=t.token;G.exp=t.exp}}catch{}
+const tokenValid=()=>!!G.token&&Date.now()<G.exp-60000;
+const REDIRECT_URI=new URL("./",location.href).href;
+function glog(msg){try{const l=JSON.parse(localStorage.getItem("glog")||"[]");l.push(new Date().toLocaleTimeString("de-DE")+" "+msg);localStorage.setItem("glog",JSON.stringify(l.slice(-15)))}catch{}}
+function connectDrive(silent){
+  const state=uid();
+  glog((silent?"Stille ":"")+"Anmeldung gestartet");
+  try{localStorage.setItem("gstate",JSON.stringify({state,silent:!!silent}))}catch{}
+  const p=new URLSearchParams({client_id:GOOGLE_CLIENT_ID,redirect_uri:REDIRECT_URI,response_type:"token",scope:S.settings.calOn?DRIVE_SCOPE+" "+CAL_SCOPE:DRIVE_SCOPE,include_granted_scopes:"true",state});
+  if(silent)p.set("prompt","none");
+  location.href="https://accounts.google.com/o/oauth2/v2/auth?"+p.toString();
+}
+function readAuthRedirect(){
+  if(!location.hash||!/access_token=|error=/.test(location.hash))return null;
+  const h=new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null,"",location.pathname+location.search);
+  let saved=null;try{saved=JSON.parse(localStorage.getItem("gstate")||"null");localStorage.removeItem("gstate")}catch{}
+  if(h.get("error")){glog("Google meldet: "+h.get("error"));return {error:h.get("error"),silent:!!saved?.silent}}
+  if(saved&&h.get("state")!==saved.state){glog("Rückkehr mit falscher Kennung");return {error:"state"}}
+  glog("Rückkehr von Google: Zugang erhalten");
+  return {token:h.get("access_token"),expires:+h.get("expires_in")||3600,scope:h.get("scope")||""};
+}
+const AUTH=readAuthRedirect();
+if(AUTH?.token){G.token=AUTH.token;G.exp=Date.now()+AUTH.expires*1000;try{localStorage.setItem("gtok",JSON.stringify({token:G.token,exp:G.exp}))}catch{}}
+async function gfetch(url,opts={}){
+  const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:"Bearer "+G.token}});
+  if(r.status===401){G.token=null;try{localStorage.removeItem("gtok")}catch{};const e=new Error("auth");e.code="auth";throw e}
+  if(!r.ok){let t="";try{t=(await r.text()).replace(/\s+/g," ").slice(0,160)}catch{}
+    glog("Google-Fehler "+r.status+": "+t);const e=new Error("google "+r.status);e.code=r.status===404||r.status===410?"gone":r.status===403?"forbidden":"fail";throw e}
+  return r;
+}
+const q=s=>encodeURIComponent(s);
+const qv=s=>String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+async function findOrCreateFolder(name,parent){
+  let query=`name='${qv(name)}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;if(parent)query+=` and '${parent}' in parents`;
+  const r=await (await gfetch(`${API}?q=${q(query)}&fields=files(id)&spaces=drive`)).json();
+  if(r.files?.length)return r.files[0].id;
+  const c=await (await gfetch(`${API}?fields=id`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,mimeType:"application/vnd.google-apps.folder",...(parent?{parents:[parent]}:{})})})).json();
+  return c.id;
+}
+async function findFile(name,parent){
+  const r=await (await gfetch(`${API}?q=${q(`name='${qv(name)}' and '${parent}' in parents and trashed=false`)}&fields=files(id)`)).json();
+  return r.files?.[0]?.id||null;
+}
+async function moveFile(id,target,name){
+  const meta=await (await gfetch(`${API}/${id}?fields=parents`)).json();
+  const remove=(meta.parents||[]).filter(p=>p!==target).join(",");
+  let url=`${API}/${id}?fields=id,webViewLink&addParents=${target}`;if(remove)url+=`&removeParents=${remove}`;
+  return (await gfetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(name?{name}:{})})).json();
+}
+async function ensureFolders(){
+  const s=S.settings;let changed=false;
+  if(!s.driveFolderId){s.driveFolderId=await findOrCreateFolder(FOLDER_NAME);changed=true}
+  if(!s.driveAppId){s.driveAppId=await findOrCreateFolder("_App-Daten",s.driveFolderId);changed=true}
+  if(!s.driveDataId){const id=await findFile(DATA_NAME,s.driveAppId);if(id){s.driveDataId=id;changed=true}}
+  if(changed)await dbPut("meta",{key:"settings",...s});
+}
+async function ensurePath(parts){
+  const s=S.settings;s.driveFolderMap=s.driveFolderMap||{};
+  let parent=s.driveFolderId,key="";
+  for(const p of parts){key+="/"+p;
+    if(!s.driveFolderMap[key]){s.driveFolderMap[key]=await findOrCreateFolder(p,parent);await dbPut("meta",{key:"settings",...s})}
+    parent=s.driveFolderMap[key];}
+  return parent;
+}
+const cleanName=s=>String(s||"").replace(/[\\/:*?"<>|#%]+/g," ").replace(/\s+/g,"_").replace(/_+/g,"_").replace(/^_|_$/g,"").slice(0,50);
+const folderName=c=>String(c||"Sonstiges").replace(/\//g,"-").replace(/[\\:*?"<>|#%]+/g," ").trim();
+function fileName(d){return [docDate(d),cleanName(d.sender||"Absender"),cleanName(d.subject||"Brief")].join("_")+".pdf"}
+const wantedFolder=d=>ensurePath([folderName(d.category),docDate(d).slice(0,4)]);
+async function uploadMultipart(meta,blob,fileId){
+  const b="b"+uid();
+  const body=new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: ${blob.type||"application/octet-stream"}\r\n\r\n`,blob,`\r\n--${b}--`]);
+  const url=fileId?`${UPLOAD}/${fileId}?uploadType=multipart&fields=id,webViewLink`:`${UPLOAD}?uploadType=multipart&fields=id,webViewLink`;
+  return (await gfetch(url,{method:fileId?"PATCH":"POST",headers:{"Content-Type":`multipart/related; boundary=${b}`},body})).json();
+}
+function stripLocal(d){const c=structuredClone(d);delete c.fileId;delete c.thumbId;return c}
+function scheduleSync(){if(!S.settings.driveLinked)return;G.dirty=true;updateChip();clearTimeout(G.timer);G.timer=setTimeout(syncNow,1500)}
+
+/* ---- Kalender: Frist als ganztägiger Termin, Erinnerung um 9 Uhr x Tage vorher und am Vortag ---- */
+function calWanted(d){return S.settings.calOn&&d.deadline&&d.status!=="erledigt"}
+function calKey(d){return [d.deadline,d.deadlineKind,d.sender,d.subject,S.settings.remindDays,d.url||""].join("|")}
+function calBody(d){
+  const end=Letter.addDays(d.deadline,1),n=Math.max(1,Math.min(27,S.settings.remindDays||3));
+  const mins=[...new Set([(n-1)*1440+900,900])];
+  return {summary:`${d.deadlineKind||"Frist"}: ${d.sender||""}${d.subject?" – "+d.subject:""}`.slice(0,200),
+    description:[d.summary,d.url?"Dokument: "+d.url:"","Eingetragen von der App „Dokumente“."].filter(Boolean).join("\n\n"),
+    start:{date:d.deadline},end:{date:end},transparency:"transparent",
+    reminders:{useDefault:false,overrides:mins.map(m=>({method:"popup",minutes:m}))},
+    extendedProperties:{private:{dokumenteId:d.id}}};
+}
+async function calSync(map){
+  if(!S.settings.calOn&&![...map.values()].some(d=>d.calId))return;
+  try{
+    for(const d of map.values()){
+      if(calWanted(d)){
+        const k=calKey(d);if(d.calId&&d.calKey===k)continue;
+        if(d.calId){
+          try{await gfetch(`${CAL}/${d.calId}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(calBody(d))})}
+          catch(e){if(e.code!=="gone")throw e;d.calId=null}
+        }
+        if(!d.calId){const r=await (await gfetch(CAL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(calBody(d))})).json();d.calId=r.id;glog("Kalender: "+dfmt(d.deadline)+" "+(d.sender||""))}
+        d.calKey=k;d.updatedAt=new Date().toISOString();
+      }else if(d.calId){
+        try{await gfetch(`${CAL}/${d.calId}`,{method:"DELETE"})}catch(e){if(e.code!=="gone")throw e}
+        d.calId=null;d.calKey=null;d.updatedAt=new Date().toISOString();glog("Kalender-Termin entfernt: "+(d.sender||""));
+      }
+    }
+    G.calErr=false;
+  }catch(e){if(e.code==="auth")throw e;G.calErr=true;glog(e.code==="forbidden"?"Kalender: kein Zugriff – Kalender-API freigegeben und beim Verbinden erlaubt?":"Kalender nicht erreichbar")}
+}
+async function syncNow(){
+  if(!S.settings.driveLinked)return;
+  if(!tokenValid()){G.dirty=true;updateChip();return}
+  if(G.busy){G.dirty=true;return}
+  G.busy=true;G.dirty=false;G.err=null;updateChip();
+  try{
+    await ensureFolders();
+    let remote=null;
+    if(S.settings.driveDataId){
+      try{remote=await (await gfetch(`${API}/${S.settings.driveDataId}?alt=media`)).json()}
+      catch(e){if(e.code==="auth")throw e;S.settings.driveDataId=null;await ensureFolders()}
+    }
+    for(const [id,t] of Object.entries(remote?.deleted||{}))if(!S.deleted[id]||S.deleted[id]<t)S.deleted[id]=t;
+    // Dokumente zusammenführen: neuere Änderung gewinnt, lokale Dateien bleiben
+    const map=new Map(S.docs.map(d=>[d.id,d]));
+    for(const r of remote?.docs||[]){
+      const l=map.get(r.id);
+      if(!l||(r.updatedAt||"")>(l.updatedAt||"")){const m=structuredClone(r);if(l){m.fileId=l.fileId;m.thumbId=l.thumbId}map.set(r.id,m)}
+    }
+    for(const [id,t] of Object.entries(S.deleted)){const d=map.get(id);if(d&&t>=(d.updatedAt||"")){map.delete(id);if(d.driveId&&!S.trash.some(x=>x.id===d.driveId))S.trash.push({kind:"file",id:d.driveId})}}
+    // PDFs hochladen bzw. in den richtigen Ordner verschieben und benennen
+    for(const d of map.values()){
+      const target=await wantedFolder(d),name=fileName(d);
+      if(!d.driveId&&d.fileId){
+        const f=await dbGet("files",d.fileId);if(!f)continue;
+        const up=await uploadMultipart({name,parents:[target],description:[d.sender,d.subject,(d.tags||[]).join(", ")].filter(Boolean).join(" · ")},f.blob);
+        d.driveId=up.id;d.url=up.webViewLink||`https://drive.google.com/file/d/${up.id}/view`;d.folder=target;d.name=name;d.updatedAt=new Date().toISOString();
+        glog("Hochgeladen: "+name);
+      }else if(d.driveId&&(d.folder!==target||d.name!==name)){
+        try{await moveFile(d.driveId,target,name);d.folder=target;d.name=name;d.updatedAt=new Date().toISOString()}
+        catch(e){if(e.code==="auth")throw e;glog("Verschieben nicht möglich: "+(d.name||d.driveId))}
+      }
+    }
+    await calSync(map);
+    // Gelöschte: Dateien in den Papierkorb, Termine entfernen
+    for(const t of [...S.trash]){
+      try{if(t.kind==="cal")await gfetch(`${CAL}/${t.id}`,{method:"DELETE"});else await gfetch(`${API}/${t.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({trashed:true})})}
+      catch(e){if(e.code==="auth")throw e;if(e.code!=="gone"&&e.code!=="forbidden")continue}
+      S.trash=S.trash.filter(x=>x!==t);
+    }
+    await dbPut("meta",{key:"trash",items:S.trash});
+    if(remote?.settings&&(remote.settingsUpdatedAt||"")>(S.settings.updatedAt||"")){
+      const keep=Object.fromEntries(LOCAL_KEYS.map(k=>[k,S.settings[k]]));
+      S.settings={...DEFAULT_SETTINGS,...remote.settings,updatedAt:remote.settingsUpdatedAt,...keep};
+    }
+    const ids=new Set(map.keys());
+    for(const old of S.docs)if(!ids.has(old.id))await dbDel("docs",old.id);
+    for(const d of map.values())await dbPut("docs",d);
+    S.docs=[...map.values()];
+    await dbPut("meta",{key:"deleted",items:S.deleted});
+    const data=exportData();
+    const blob=new Blob([JSON.stringify(data)],{type:"application/json"});
+    const up=await uploadMultipart(S.settings.driveDataId?{}:{name:DATA_NAME,parents:[S.settings.driveAppId]},blob,S.settings.driveDataId);
+    if(!S.settings.driveDataId)S.settings.driveDataId=up.id;
+    await dailySnapshot(data);
+    await dbPut("meta",{key:"settings",...S.settings});
+    G.last=new Date();glog("Abgleich erfolgreich ("+S.docs.length+" Dokumente)");
+  }catch(e){G.err=e.code==="auth"?"auth":"fail";G.dirty=true;glog("Abgleich fehlgeschlagen: "+(e?.message||e))}
+  finally{G.busy=false;updateChip();render()}
+  if(G.dirty&&!G.err)scheduleSync();
+}
+async function dailySnapshot(data){
+  const day=today();if(S.settings.lastSnapshot===day)return;
+  try{
+    if(!S.settings.driveSnapId)S.settings.driveSnapId=await findOrCreateFolder("Sicherungen",S.settings.driveAppId);
+    const name=`Sicherung_${day}.json`;
+    if(!await findFile(name,S.settings.driveSnapId)){
+      await uploadMultipart({name,parents:[S.settings.driveSnapId]},new Blob([JSON.stringify(data)],{type:"application/json"}));glog("Tagessicherung erstellt: "+name)}
+    S.settings.lastSnapshot=day;
+  }catch(e){if(e.code==="auth")throw e;S.settings.driveSnapId=null;glog("Tagessicherung fehlgeschlagen")}
+}
+function driveStatus(){
+  if(!S.settings.driveLinked)return {text:"Nicht verbunden.",pending:false};
+  if(G.busy)return {text:"Gleicht gerade ab …",pending:false};
+  const pending=G.dirty||!!G.err;
+  if(G.err==="auth"||(pending&&!tokenValid()))return {text:"Änderungen sind noch nicht in Drive. Tippe auf „Jetzt abgleichen“.",pending:true};
+  if(G.err)return {text:"Der letzte Abgleich ist fehlgeschlagen. Tippe auf „Jetzt abgleichen“.",pending:true};
+  if(pending)return {text:"Änderungen werden gleich abgeglichen.",pending:true};
+  if(G.last)return {text:"Alles in Drive gespeichert, zuletzt um "+G.last.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})+" Uhr.",pending:false};
+  return {text:"Verbunden.",pending:false};
+}
+function updateChip(){
+  try{if(G.dirty)localStorage.setItem("gdirty","1");else localStorage.removeItem("gdirty")}catch{}
+  const st=driveStatus();$("#settingsDot").hidden=!st.pending;
+  const el=$("#driveStatus");if(el)el.textContent=st.text;
+}
+try{if(localStorage.getItem("gdirty")==="1")G.dirty=true}catch{}
+async function driveBlob(driveId){if(!tokenValid()||!driveId)return null;try{return await (await gfetch(`${API}/${driveId}?alt=media`)).blob()}catch{return null}}
+
+/* ================= Dateien von außen: Teilen-Menü und „Öffnen mit“ ================= */
+async function takeShared(){
+  history.replaceState(null,"",location.pathname);
+  try{const c=await caches.open("share-inbox");const key=new URL("shared-file",location.origin+location.pathname).href;
+    const r=await c.match(key);if(!r)return;const b=await r.blob();await c.delete(key);
+    takeIncoming(new File([b],decodeURIComponent(r.headers.get("x-name")||"Dokument"),{type:b.type||r.headers.get("content-type")||""}))}catch{toast("Die geteilte Datei konnte nicht gelesen werden.")}
+}
+async function takeIncoming(f){while(!S.loaded)await new Promise(r=>setTimeout(r,100));if(S.edit)closeSheet();openNew({file:f})}
+if("launchQueue" in window)launchQueue.setConsumer(async p=>{if(p.files?.length){try{takeIncoming(await p.files[0].getFile())}catch{}}});
+
+/* ================= Start ================= */
+(async()=>{
+  render();
+  try{
+    const st=await dbGet("meta","settings");if(st){const {key,...rest}=st;S.settings={...DEFAULT_SETTINGS,...rest}}
+    S.docs=await dbAll("docs");
+    const del=await dbGet("meta","deleted");S.deleted=del?.items||{};
+    const tq=await dbGet("meta","trash");S.trash=tq?.items||[];
+  }catch(err){$("#list").innerHTML=`<div class="empty">Speicher nicht verfügbar. Bitte die App nicht im privaten Modus öffnen.</div>`;return}
+  S.loaded=true;render();updateChip();
+  if(new URLSearchParams(location.search).has("share"))takeShared();
+  if(AUTH?.token&&!S.settings.driveLinked){S.settings.driveLinked=true;await dbPut("meta",{key:"settings",...S.settings});updateChip()}
+  if(AUTH?.token&&S.settings.calOn&&AUTH.scope&&!AUTH.scope.includes("calendar")){glog("Kalender-Zugriff wurde nicht erlaubt");toast("Kalender-Zugriff wurde nicht erlaubt")}
+  if(AUTH?.error){
+    if(AUTH.silent&&/interaction_required|login_required|consent_required/.test(AUTH.error))return connectDrive(false);
+    toast(AUTH.error==="access_denied"?"Anmeldung abgebrochen":"Anmeldung bei Google fehlgeschlagen ("+AUTH.error+")");
+  }
+  if(AUTH?.token)toast(S.settings.calOn?"Mit Google Drive und Kalender verbunden":"Mit Google Drive verbunden");
+  if(S.settings.driveLinked&&tokenValid())syncNow();
+  document.addEventListener("visibilitychange",async()=>{
+    if(document.visibilityState!=="visible")return;
+    try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()&&t.token!==G.token){G.token=t.token;G.exp=t.exp}}catch{}
+    updateChip();render();
+    if(S.settings.driveLinked&&tokenValid()&&(G.dirty||!G.last||Date.now()-G.last>60000))syncNow();
+  });
+  try{await navigator.storage?.persist?.()}catch{}
+  if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+})();
+</script>
+</body>
+</html>
