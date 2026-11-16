@@ -816,17 +816,66 @@ function convexHull(pts){
   for(let i=P.length-1;i>=0;i--){const p=P[i];while(up.length>=2&&cr(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p)}
   lo.pop();up.pop();return lo.concat(up);
 }
-// Größtes Viereck aus den Hüllpunkten; Ecken sortiert: oben links, oben rechts, unten rechts, unten links
-function quadFromPoints(pts){
+// Ecken sortieren: oben links, oben rechts, unten rechts, unten links
+function orderQuad(q){
+  const cx=q.reduce((s,p)=>s+p[0],0)/4,cy=q.reduce((s,p)=>s+p[1],0)/4;
+  q=q.slice().sort((p,r)=>Math.atan2(p[1]-cy,p[0]-cx)-Math.atan2(r[1]-cy,r[0]-cx));
+  let st=0;q.forEach((p,i)=>{if(p[0]+p[1]<q[st][0]+q[st][1])st=i});
+  return q.slice(st).concat(q.slice(0,st)).map(p=>[p[0],p[1]]);
+}
+// Viereck aus dem Umriss: Hülle vereinfachen, Blattseiten = Hüllkanten, die das kleinste umschließende Viereck bilden,
+// Ecken = Schnittpunkte benachbarter Seiten. So werden auch abgeschattete oder umgeknickte Ecken rekonstruiert.
+function quadFromPoints(pts,w,h){
   let H=convexHull(pts);if(H.length<4)return null;
   const tri=(a,b,c)=>Math.abs((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]))/2;
-  while(H.length>24){let bi=0,bv=1e18;for(let i=0;i<H.length;i++){const v=tri(H[(i-1+H.length)%H.length],H[i],H[(i+1)%H.length]);if(v<bv){bv=v;bi=i}}H.splice(bi,1)}
+  const total=polyArea(H);
+  const minTri=()=>{let bi=0,bv=1e18;for(let i=0;i<H.length;i++){const v=tri(H[(i-1+H.length)%H.length],H[i],H[(i+1)%H.length]);if(v<bv){bv=v;bi=i}}return [bi,bv]};
+  for(;;){if(H.length<=4)break;const [bi,bv]=minTri();if(H.length>12||bv<total*0.002){H.splice(bi,1)}else break}
+  // fast gerade Knicke entfernen (Seite in zwei Stücke geteilt)
+  const dir=(a,b)=>Math.atan2(b[1]-a[1],b[0]-a[0]);
+  const turn=i=>{const n=H.length,a=H[(i-1+n)%n],b=H[i],c=H[(i+1)%n];let d=Math.abs(dir(a,b)-dir(b,c));if(d>Math.PI)d=2*Math.PI-d;return d};
+  for(let ch=true;ch&&H.length>4;){ch=false;for(let i=0;i<H.length&&H.length>4;i++)if(turn(i)<10*Math.PI/180){H.splice(i,1);ch=true;break}}
+  if(H.length===4)return orderQuad(H);
+  const n=H.length,len=i=>Math.hypot(H[(i+1)%n][0]-H[i][0],H[(i+1)%n][1]-H[i][1]);
+  let per=0;for(let i=0;i<n;i++)per+=len(i);
+  const cut=(i,j)=>{const [a,b]=[H[i],H[(i+1)%n]],[c,d]=[H[j],H[(j+1)%n]];
+    const r=[b[0]-a[0],b[1]-a[1]],s=[d[0]-c[0],d[1]-c[1]],den=r[0]*s[1]-r[1]*s[0];if(Math.abs(den)<1e-9)return null;
+    const sn=Math.abs(den)/(Math.hypot(...r)*Math.hypot(...s));if(sn<Math.sin(40*Math.PI/180))return null;
+    const t=((c[0]-a[0])*s[1]-(c[1]-a[1])*s[0])/den;return [a[0]+t*r[0],a[1]+t*r[1]]};
+  // Stützung: Anteil einer Kante, entlang dem wirklich Randpunkte liegen (überbrückte Lücken, z. B. an Fingern, haben wenig)
+  const grid=new Uint8Array(w*h);for(const [x,y] of pts)for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<w&&Y<h)grid[Y*w+X]=1}
+  let sgn=0;for(let i=0;i<n;i++){const a=H[i],b=H[(i+1)%n];sgn+=a[0]*b[1]-b[0]*a[1]}
+  // Kandidaten-Linien: Hüllkanten und Sehnen über bis zu 3 Hüllpunkte hinweg (überspringt Ausbuchtungen wie Finger).
+  // Jede Linie muss lang genug und entlang ihrer Länge von echten Randpunkten gestützt sein.
+  const seg=(i,j)=>{const A=H[i%n],B=H[j%n];return {i,j,A,B,len:Math.hypot(B[0]-A[0],B[1]-A[1])}};
+  const supS=L=>{let k=0;for(let t=0;t<24;t++){const f=(t+.5)/24,X=Math.round(L.A[0]+(L.B[0]-L.A[0])*f),Y=Math.round(L.A[1]+(L.B[1]-L.A[1])*f);if(X>=0&&Y>=0&&X<w&&Y<h&&grid[Y*w+X])k++}return k/24};
+  const lines=[];for(let i=0;i<n;i++)for(let sk=1;sk<=Math.min(4,n-3);sk++){const L=seg(i,i+sk);if(L.len>=per/4*0.25&&supS(L)>=(sk===1?0.7:0.8))lines.push(L)}
+  const cutL=(L,M)=>{const r=[L.B[0]-L.A[0],L.B[1]-L.A[1]],s2=[M.B[0]-M.A[0],M.B[1]-M.A[1]],den=r[0]*s2[1]-r[1]*s2[0];if(Math.abs(den)<1e-9)return null;
+    if(Math.abs(den)/(L.len*M.len)<Math.sin(40*Math.PI/180))return null;const t=((M.A[0]-L.A[0])*s2[1]-(M.A[1]-L.A[1])*s2[0])/den;return [L.A[0]+t*r[0],L.A[1]+t*r[1]]};
+  const sg=Math.sign(sgn)||1;
+  const insideX=(P,skip)=>H.every((v,vi)=>{if(skip.has(vi))return true;for(let k=0;k<4;k++){const a=P[k],b=P[(k+1)%4],cr=(b[0]-a[0])*(v[1]-a[1])-(b[1]-a[1])*(v[0]-a[0]);if(cr*sg<-2*Math.hypot(b[0]-a[0],b[1]-a[1]))return false}return true});
+  // Linien in Umlaufreihenfolge, ohne Überlappung; kleinstes gültiges Viereck gewinnt
+  const pick=lines=>{let q=null,qa=1e18;const m=lines.length;
+  for(let a=0;a<m;a++){const L0=lines[a];for(let b=0;b<m;b++){const L1=lines[b];if(L1.i<L0.j||L1.i>=L0.i+n)continue;
+    for(let c=0;c<m;c++){const L2=lines[c];if(L2.i<L1.j||L2.i>=L0.i+n)continue;
+      for(let d=0;d<m;d++){const L3=lines[d];if(L3.i<L2.j||L3.j>L0.i+n)continue;
+        const S=[L0,L1,L2,L3],P=[];let ok=true;
+        for(let k=0;k<4&&ok;k++){const p=cutL(S[k],S[(k+1)%4]);if(!p||p[0]<-0.05*w||p[1]<-0.05*h||p[0]>1.05*w||p[1]>1.05*h)ok=false;else P.push(p)}
+        if(!ok)continue;const ar=polyArea(P);if(ar>=qa)continue;
+        const skip=new Set();for(const L of S)for(let v=L.i+1;v<L.j;v++)skip.add(v%n);
+        if(insideX(P,skip)){qa=ar;q=P}}}}}
+    return q};
+  // zuerst nur echte Hüllkanten, Sehnen nur wenn nötig
+  let q=pick(lines.filter(L=>L.j-L.i===1))||pick(lines);
+  if(!q)return fallbackQuad(H);
+  q=q.map(p=>[Math.max(0,Math.min(w-1,p[0])),Math.max(0,Math.min(h-1,p[1]))]);
+  return orderQuad(q);
+}
+// Rückfall: größtes Viereck aus den Hüllpunkten
+function fallbackQuad(H){
   const n=H.length;let best=null,ba=-1;
   for(let a=0;a<n;a++)for(let b=a+1;b<n;b++)for(let c=b+1;c<n;c++)for(let d=c+1;d<n;d++){const ar=polyArea([H[a],H[b],H[c],H[d]]);if(ar>ba){ba=ar;best=[H[a],H[b],H[c],H[d]]}}
-  const cx=best.reduce((s,p)=>s+p[0],0)/4,cy=best.reduce((s,p)=>s+p[1],0)/4;
-  best.sort((p,q)=>Math.atan2(p[1]-cy,p[0]-cx)-Math.atan2(q[1]-cy,q[0]-cx));
-  let st=0;best.forEach((p,i)=>{if(p[0]+p[1]<best[st][0]+best[st][1])st=i});
-  return best.slice(st).concat(best.slice(0,st)).map(p=>[p[0],p[1]]);
+  return orderQuad(best);
 }
 function detectQuad(src){
   const W=360,sc=W/Math.max(src.width,src.height),w=Math.max(1,Math.round(src.width*sc)),h=Math.max(1,Math.round(src.height*sc));
@@ -845,7 +894,8 @@ function detectQuad(src){
     if(!bestSize)return null;
     // Umriss: je Zeile linkester/rechtester Punkt der Fläche -> konvexe Hülle -> größtes einbeschriebenes Viereck
     const pts=[];for(let y=0;y<h;y++){let l=-1,r=-1;for(let x=0;x<w;x++)if(lab[y*w+x]===bestLab){if(l<0)l=x;r=x}if(l>=0){pts.push([l,y]);if(r!==l)pts.push([r,y])}}
-    const q=quadFromPoints(pts);if(!q)return null;
+    for(let x=0;x<w;x++){let t=-1,b=-1;for(let y=0;y<h;y++)if(lab[y*w+x]===bestLab){if(t<0)t=y;b=y}if(t>=0){pts.push([x,t]);if(b!==t)pts.push([x,b])}}
+    const q=quadFromPoints(pts,w,h);if(!q)return null;
     const area=polyArea(q);
     return {size:bestSize,quad:q,fill:area?bestSize/area:0}};
   const t1=otsu(-1),cands=[];
