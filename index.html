@@ -343,6 +343,30 @@ async function shareDoc(d){
   else{const u=URL.createObjectURL(f.blob);const a=document.createElement("a");a.href=u;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),5000)}
 }
 
+/* ================= Texterkennung: Qualität prüfen, bei Zeichensalat gedrehte Varianten versuchen ================= */
+const isImg=f=>/^image\//.test(f.type||"")||/\.(png|jpe?g|webp|heic|gif|bmp)$/i.test(f.name||"");
+// Anteil echter Wörter: Buchstabenfolgen ab 3 Zeichen mit Vokal, an allen Textstücken
+function ocrQuality(t){
+  const toks=String(t||"").split(/\s+/).filter(x=>x.length>=2);if(toks.length<5)return 0;
+  const good=toks.filter(x=>/^[(„"]?[A-Za-zÄÖÜäöüß][a-zäöüß-]{2,}[.,:;)"“]?$/.test(x)&&/[aeiouäöüy]/i.test(x)).length;
+  return good/toks.length;
+}
+async function rotateBlob(blob,deg){
+  const bmp=await createImageBitmap(blob);const sw=deg%180!==0;
+  const cv=document.createElement("canvas");cv.width=sw?bmp.height:bmp.width;cv.height=sw?bmp.width:bmp.height;
+  const g=cv.getContext("2d");g.translate(cv.width/2,cv.height/2);g.rotate(deg*Math.PI/180);g.drawImage(bmp,-bmp.width/2,-bmp.height/2);
+  return await new Promise(r=>cv.toBlob(r,"image/png"));
+}
+async function ocrBest(img){
+  let best={t:await tessRec(img)};best.q=ocrQuality(best.t);
+  if(best.q>=0.45)return best.t;
+  for(const deg of [90,270,180]){
+    setStatus?.(`Text schlecht lesbar – versuche gedrehtes Bild (${deg}°) …`);
+    try{const t=await tessRec(await rotateBlob(img,deg)),q=ocrQuality(t);if(q>best.q)best={t,q};if(q>=0.6)break}catch{}
+  }
+  return best.t;
+}
+
 /* ================= Großansicht (Fotos und PDF-Seiten, mit Zoom) ================= */
 const V={zoom:1,urls:[],open:false};
 async function docBlob(d){
@@ -717,7 +741,7 @@ function drawScanStart(){
     if(act==="scancancel"){S.scan.pages.forEach(p=>URL.revokeObjectURL(p.url));return scanFinish(null)}
     if(act==="scandone")return finishScanPdf();
     if(act==="scandel"){const p=S.scan.pages.splice(+b.dataset.i,1)[0];URL.revokeObjectURL(p.url);return drawScanStart()}
-    if(act==="scanfile"){const p=$("#pick");p.value="";p.onchange=()=>{const f=p.files[0];if(f)scanFinish({file:f})};p.click();return}
+    if(act==="scanfile"){const p=$("#pick");p.value="";p.onchange=()=>{const f=p.files[0];if(!f)return;if(isImg(f))scanLoad(f);else scanFinish({file:f})};p.click();return}
     if(act==="scancam"){const c=$("#cam");c.value="";c.onchange=()=>{const f=c.files[0];if(f)scanLoad(f)};c.click()}
   });
 }
@@ -820,7 +844,7 @@ async function finishScanPdf(){
 }
 // Texterkennung für Scan-Ergebnis (Bilder sind schon aufbereitet) oder Datei
 async function readText(input){
-  if(input.images){await ensureTess();let t="";for(const im of input.images)t+=(await tessRec(im))+"\n";return t}
+  if(input.images){await ensureTess();let t="";for(const im of input.images)t+=(await ocrBest(im))+"\n";return t}
   return docText(input.file||input);
 }
 
@@ -853,7 +877,7 @@ async function docText(file){
     }
     return text;
   }
-  await ensureTess();return await tessRec(await prepareForOcr(file));
+  await ensureTess();return await ocrBest(await prepareForOcr(file));
 }
 async function toPdf(blob){
   if(blob.type==="application/pdf")return blob;
@@ -1098,7 +1122,9 @@ async function takeShared(){
     const r=await c.match(key);if(!r)return;const b=await r.blob();await c.delete(key);
     takeIncoming(new File([b],decodeURIComponent(r.headers.get("x-name")||"Dokument"),{type:b.type||r.headers.get("content-type")||""}))}catch{toast("Die geteilte Datei konnte nicht gelesen werden.")}
 }
-async function takeIncoming(f){while(!S.loaded)await new Promise(r=>setTimeout(r,100));if(S.edit)closeSheet();openNew({file:f})}
+async function takeIncoming(f){while(!S.loaded)await new Promise(r=>setTimeout(r,100));if(S.edit)closeSheet();
+  if(isImg(f)){const pr=scanDocument("Brief erfassen");scanLoad(f);const r=await pr;if(r)openNew(r);return}
+  openNew({file:f})}
 if("launchQueue" in window)launchQueue.setConsumer(async p=>{if(p.files?.length){try{takeIncoming(await p.files[0].getFile())}catch{}}});
 
 /* ================= Start ================= */
