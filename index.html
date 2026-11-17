@@ -58,6 +58,13 @@ header.top p{margin:2px 0 0;color:var(--muted);font-size:13px}
 .due-item .d{font-family:var(--f-num);font-size:13px;white-space:nowrap;font-weight:600}
 .due-item.over .d{color:#ffc7c2}
 .list{display:flex;flex-direction:column;gap:10px}
+.grp{display:flex;align-items:center;gap:10px;width:100%;border:0;background:var(--sunken);color:var(--ink);border-radius:10px;padding:10px 12px;font:inherit;font-size:14.5px;font-weight:600;text-align:left;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;margin-top:4px}
+.grp .chev{flex:none;width:16px;height:16px;transition:transform .15s;color:var(--muted)}
+.grp[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.grp .gn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp .c{font-family:var(--f-num);font-size:12.5px;color:var(--muted);font-weight:500}
+.grp.allsel{box-shadow:0 0 0 2px var(--accent)}
+.chips .lbl{flex:none;align-self:center;font-size:12.5px;color:var(--muted);padding-left:2px}
 .year{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin-top:6px}
 .card{background:var(--surface);border:0;box-shadow:var(--shadow);border-radius:var(--r);padding:13px 15px;display:flex;gap:12px;text-align:left;font:inherit;color:inherit;width:100%;align-items:flex-start}
 .card:active{transform:scale(.99)}
@@ -170,6 +177,7 @@ details summary{cursor:pointer}
   <section id="dueBox" class="due-box" hidden></section>
   <nav class="chips" id="statusChips" aria-label="Status"></nav>
   <nav class="chips" id="catChips" aria-label="Kategorien"></nav>
+  <nav class="chips" id="groupChips" aria-label="Gruppieren"></nav>
   <section class="list" id="list" aria-live="polite"><div class="empty">Dokumente werden geladen …</div></section>
 </div>
 <button class="fab" id="btnAdd" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 12h8"/></svg>Brief erfassen</button>
@@ -223,7 +231,7 @@ const DEFAULT_CATEGORIES=[
 const DEFAULT_SETTINGS={categories:DEFAULT_CATEGORIES,soonDays:14,calOn:false,remindDays:3,lastBackup:null};
 const STATUS={neu:"Neu",todo:"Zu erledigen",erledigt:"Erledigt"};
 const STATUS_CLS={neu:"s-neu",todo:"s-todo",erledigt:"s-ok"};
-const S={docs:[],deleted:{},trash:[],settings:structuredClone(DEFAULT_SETTINGS),loaded:false,status:"offen",cat:"alle",q:"",edit:null,scan:null,sel:null,shown:[]};
+const S={docs:[],deleted:{},trash:[],settings:structuredClone(DEFAULT_SETTINGS),loaded:false,status:"offen",cat:"alle",group:"keine",open:{},q:"",edit:null,scan:null,sel:null,shown:[]};
 
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -275,6 +283,57 @@ async function thumbUrl(d){
   if(!d.thumbId)return null;if(thumbCache.has(d.thumbId))return thumbCache.get(d.thumbId);
   const f=await dbGet("files",d.thumbId).catch(()=>null);if(!f)return null;const u=URL.createObjectURL(f.blob);thumbCache.set(d.thumbId,u);return u;
 }
+/* ================= Gruppierung ================= */
+const GROUPS=[["keine","Keine"],["kategorie","Kategorie"],["absender","Absender"],["jahr","Jahr"],["status","Status"]];
+try{const g=JSON.parse(localStorage.getItem("grp")||"null");if(g&&GROUPS.some(x=>x[0]===g.mode)){S.group=g.mode;S.open=g.open||{}}}catch{}
+function saveGrp(){try{localStorage.setItem("grp",JSON.stringify({mode:S.group,open:S.open}))}catch{}}
+// Absender grob vereinheitlichen: Groß-/Kleinschreibung, Satzzeichen, Rechtsformen ignorieren
+const LEGAL=new Set(["gmbh","mbh","ag","kg","kgaa","ohg","gbr","ug","se","ev","eg","co","und","haftungsbeschraenkt","vvag","ltd","inc"]);
+function senderTokens(n){return fold(n).replace(/e\.\s*v\./g," ev ").replace(/&/g," und ").split(/[^a-z0-9]+/).filter(t=>t&&!LEGAL.has(t))}
+function senderGroups(rows){
+  const keyOf=new Map(),toks=new Map();
+  for(const d of rows){const t=senderTokens(d.sender||"");const k=t.join(" ");keyOf.set(d.id,k);if(k)toks.set(k,t)}
+  // kürzere Schreibweise, die am Wortanfang übereinstimmt, übernimmt die längere (HUK-COBURG ⊂ HUK Coburg Versicherung)
+  const keys=[...toks.keys()].sort((a,b)=>toks.get(a).length-toks.get(b).length||a.length-b.length),root=new Map();
+  for(const k of keys){const t=toks.get(k);let r=k;
+    for(const c of keys){const ct=toks.get(c);if(c===k||ct.length>=t.length||ct.join("").length<4)continue;if(ct.every((w,i)=>t[i]===w)){r=root.get(c)||c;break}}
+    root.set(k,r)}
+  const names=new Map();
+  for(const d of rows){const k=keyOf.get(d.id);if(!k)continue;const r=root.get(k);const m=names.get(r)||new Map();const n=(d.sender||"").trim();m.set(n,(m.get(n)||0)+1);names.set(r,m)}
+  const label=r=>[...names.get(r)].sort((a,b)=>b[1]-a[1]||a[0].length-b[0].length||(a[0]===a[0].toLowerCase())-(b[0]===b[0].toLowerCase()))[0][0];
+  return d=>{const k=keyOf.get(d.id);if(!k)return {key:"",name:"Unbekannter Absender"};const r=root.get(k);return {key:r,name:label(r)}};
+}
+function groupRows(rows){
+  const m=S.group;let gf,order;
+  if(m==="kategorie"){gf=d=>({key:d.category||"",name:d.category||"Ohne Kategorie"});order=(a,b)=>!a.key-!b.key||a.name.localeCompare(b.name,"de")}
+  else if(m==="absender"){gf=senderGroups(rows);order=(a,b)=>!a.key-!b.key||a.name.localeCompare(b.name,"de",{sensitivity:"base"})}
+  else if(m==="jahr"){gf=d=>{const y=docDate(d).slice(0,4);return {key:y,name:y}};order=(a,b)=>b.key.localeCompare(a.key)}
+  else if(m==="status"){const o=["neu","todo","erledigt"];gf=d=>{const k=STATUS[d.status]?d.status:"neu";return {key:k,name:STATUS[k]}};order=(a,b)=>o.indexOf(a.key)-o.indexOf(b.key)}
+  const map=new Map();
+  for(const d of rows){const g=gf(d);if(!map.has(g.key))map.set(g.key,{...g,docs:[]});map.get(g.key).docs.push(d)}
+  return [...map.values()].sort(order);
+}
+const isGrpOpen=k=>!!S.q||(S.open[S.group]||[]).includes(k);
+function toggleGrp(k){const l=new Set(S.open[S.group]||[]);l.has(k)?l.delete(k):l.add(k);S.open[S.group]=[...l];saveGrp();render()}
+function selectGrp(k){
+  const g=(S.groups||[]).find(x=>x.key===k);if(!g)return;const ids=g.docs.map(d=>d.id);
+  if(!S.sel)startSel(null);
+  const allOn=ids.every(id=>S.sel.has(id));ids.forEach(id=>allOn?S.sel.delete(id):S.sel.add(id));
+  try{navigator.vibrate?.(25)}catch{}render();
+}
+const ICON_CHEV=`<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`;
+function cardHtml(d){
+  const i=dueInfo(d),sn=S.q?snippet(d,S.q):"";
+  const on=S.sel?.has(d.id);
+  return `<button type="button" class="card${on?" sel":""}" data-id="${d.id}"${S.sel?` aria-pressed="${!!on}"`:""}>
+      ${S.sel?`<span class="ck" aria-hidden="true">✓</span>`:""}${d.thumbId?`<img class="th" data-thumb="${d.thumbId}" alt="">`:`<span class="th ph">${ICON_DOC}</span>`}
+      <span class="body">
+        <span class="r1"><span class="snd">${esc(d.sender||"Unbekannter Absender")}</span><span class="dt">${dfmt(docDate(d))}</span></span>
+        <span class="sbj">${esc(d.subject||"Ohne Betreff")}</span>
+        <span class="meta"><span class="stamp ${STATUS_CLS[d.status]||"s-neu"}">${STATUS[d.status]||"Neu"}</span>${i?`<span class="stamp ${i.over||i.n<=3?"s-bad":"s-todo"}">${esc(d.deadlineKind||"Frist")} ${i.text}</span>`:""}${(d.tags||[]).slice(0,4).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</span>
+        ${sn?`<span class="hit">${sn}</span>`:""}
+      </span></button>`;
+}
 function render(){
   if(!S.loaded)return;
   const all=live();
@@ -292,6 +351,7 @@ function render(){
   const stF=(sts.find(s=>s[0]===S.status)||sts[0])[2];
   const cats=["alle",...catNames()];
   $("#catChips").innerHTML=cats.map(c=>`<button type="button" class="chip" data-cat="${esc(c)}" aria-pressed="${S.cat===c}">${c==="alle"?"Alle Kategorien":esc(c)}<span class="c">${cnt(d=>(c==="alle"||d.category===c)&&stF(d))}</span></button>`).join("");
+  $("#groupChips").innerHTML=`<span class="lbl">Gruppieren:</span>`+GROUPS.map(([k,l])=>`<button type="button" class="chip" data-group="${k}" aria-pressed="${S.group===k}">${l}</button>`).join("");
   // Liste
   let rows=all.filter(d=>(S.q?true:stF(d))&&(S.cat==="alle"||d.category===S.cat)&&matchQ(d,S.q));
   rows.sort((a,b)=>docDate(b).localeCompare(docDate(a))||(b.createdAt||"").localeCompare(a.createdAt||""));
@@ -301,34 +361,38 @@ function render(){
   const list=$("#list");
   if(!all.length){list.innerHTML=`<div class="empty">Noch keine Dokumente.<br>Tippe auf „Brief erfassen“ und fotografiere den ersten Brief.</div>`;return}
   if(!rows.length){list.innerHTML=`<div class="empty">${S.q?"Nichts gefunden.":"Keine Dokumente in dieser Ansicht."}</div>`;return}
-  let html="",year="";
-  for(const d of rows){
-    const y=docDate(d).slice(0,4);if(y!==year){year=y;html+=`<div class="year">${y}</div>`}
-    const i=dueInfo(d),sn=S.q?snippet(d,S.q):"";
-    const on=S.sel?.has(d.id);
-    html+=`<button type="button" class="card${on?" sel":""}" data-id="${d.id}"${S.sel?` aria-pressed="${!!on}"`:""}>
-      ${S.sel?`<span class="ck" aria-hidden="true">✓</span>`:""}${d.thumbId?`<img class="th" data-thumb="${d.thumbId}" alt="">`:`<span class="th ph">${ICON_DOC}</span>`}
-      <span class="body">
-        <span class="r1"><span class="snd">${esc(d.sender||"Unbekannter Absender")}</span><span class="dt">${dfmt(docDate(d))}</span></span>
-        <span class="sbj">${esc(d.subject||"Ohne Betreff")}</span>
-        <span class="meta"><span class="stamp ${STATUS_CLS[d.status]||"s-neu"}">${STATUS[d.status]||"Neu"}</span>${i?`<span class="stamp ${i.over||i.n<=3?"s-bad":"s-todo"}">${esc(d.deadlineKind||"Frist")} ${i.text}</span>`:""}${(d.tags||[]).slice(0,4).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</span>
-        ${sn?`<span class="hit">${sn}</span>`:""}
-      </span></button>`;
+  let html="";
+  if(S.group==="keine"){
+    S.groups=null;let year="";
+    for(const d of rows){const y=docDate(d).slice(0,4);if(y!==year){year=y;html+=`<div class="year">${y}</div>`}html+=cardHtml(d)}
+  }else{
+    S.groups=groupRows(rows);
+    for(const g of S.groups){
+      const open=isGrpOpen(g.key),allSel=!!S.sel&&g.docs.every(d=>S.sel.has(d.id));
+      html+=`<button type="button" class="grp${allSel?" allsel":""}" data-grp="${esc(g.key)}" aria-expanded="${open}">${ICON_CHEV}<span class="gn">${esc(g.name)}</span><span class="c">${g.docs.length}</span></button>`;
+      if(open)html+=g.docs.map(cardHtml).join("");
+    }
   }
   list.innerHTML=html;
   list.querySelectorAll("img[data-thumb]").forEach(async img=>{const d=S.docs.find(x=>x.thumbId===img.dataset.thumb);const u=d&&await thumbUrl(d);if(u)img.src=u;else img.replaceWith(Object.assign(document.createElement("span"),{className:"th ph",innerHTML:ICON_DOC}))});
 }
 $("#statusChips").addEventListener("click",e=>{const b=e.target.closest("[data-status]");if(!b)return;S.status=b.dataset.status;render()});
 $("#catChips").addEventListener("click",e=>{const b=e.target.closest("[data-cat]");if(!b)return;S.cat=b.dataset.cat;render()});
+$("#groupChips").addEventListener("click",e=>{const b=e.target.closest("[data-group]");if(!b)return;S.group=b.dataset.group;saveGrp();render()});
 /* Mehrfachauswahl: langes Drücken startet die Auswahl, danach Antippen zum Hinzufügen/Entfernen */
 const LP={t:null,x:0,y:0,fired:false};
-$("#list").addEventListener("pointerdown",e=>{LP.fired=false;clearTimeout(LP.t);const b=e.target.closest(".card[data-id]");if(!b||S.sel)return;
+$("#list").addEventListener("pointerdown",e=>{LP.fired=false;clearTimeout(LP.t);
+  const g=e.target.closest(".grp[data-grp]");if(g){LP.x=e.clientX;LP.y=e.clientY;LP.t=setTimeout(()=>{LP.fired=true;selectGrp(g.dataset.grp)},500);return}
+  const b=e.target.closest(".card[data-id]");if(!b||S.sel)return;
   LP.x=e.clientX;LP.y=e.clientY;LP.t=setTimeout(()=>{LP.fired=true;startSel(b.dataset.id)},500)});
 $("#list").addEventListener("pointermove",e=>{if(LP.t&&Math.hypot(e.clientX-LP.x,e.clientY-LP.y)>10){clearTimeout(LP.t);LP.t=null}});
 ["pointerup","pointercancel"].forEach(ev=>$("#list").addEventListener(ev,()=>{clearTimeout(LP.t);LP.t=null}));
-$("#list").addEventListener("contextmenu",e=>{const b=e.target.closest(".card[data-id]");if(!b)return;e.preventDefault();
+$("#list").addEventListener("contextmenu",e=>{const g=e.target.closest(".grp[data-grp]");if(g){e.preventDefault();if(!LP.fired){clearTimeout(LP.t);LP.fired=true;selectGrp(g.dataset.grp)}return}
+  const b=e.target.closest(".card[data-id]");if(!b)return;e.preventDefault();
   if(!S.sel&&!LP.fired){clearTimeout(LP.t);LP.fired=true;startSel(b.dataset.id)}});
-$("#list").addEventListener("click",e=>{const b=e.target.closest("[data-id]");if(!b)return;
+$("#list").addEventListener("click",e=>{
+  const g=e.target.closest(".grp[data-grp]");if(g){if(LP.fired){LP.fired=false;return}return toggleGrp(g.dataset.grp)}
+  const b=e.target.closest("[data-id]");if(!b)return;
   if(LP.fired){LP.fired=false;return}
   if(S.sel){toggleSel(b.dataset.id);return}
   openView(b.dataset.id)});
