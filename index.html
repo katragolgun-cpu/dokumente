@@ -78,6 +78,21 @@ header.top p{margin:2px 0 0;color:var(--muted);font-size:13px}
 .empty{background:var(--surface);box-shadow:var(--shadow);border-radius:var(--r);padding:24px 16px;text-align:center;color:var(--muted)}
 .fab{position:fixed;right:max(18px,calc(env(safe-area-inset-right,0px) + 18px));bottom:calc(22px + env(safe-area-inset-bottom,0px));height:58px;display:flex;align-items:center;gap:8px;background:var(--accent);color:var(--accent-ink);border:0;border-radius:29px;padding:0 22px 0 18px;box-shadow:0 6px 20px rgba(0,0,0,.22);z-index:7;font:inherit;font-weight:700;font-size:15px}
 .fab svg{width:24px;height:24px}
+/* Mehrfachauswahl */
+.card{position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.card.sel{box-shadow:0 0 0 2px var(--accent),var(--shadow)}
+.card .ck{position:absolute;top:7px;left:7px;width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);background:var(--surface);display:grid;place-items:center;font-size:13px;font-weight:700;color:transparent}
+.card.sel .ck{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.selbar{position:fixed;left:0;right:0;bottom:0;z-index:8;background:var(--surface);box-shadow:0 -4px 18px rgba(0,0,0,.15);border-radius:18px 18px 0 0;
+  padding:10px max(16px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.selbar .in{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
+.selhead{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700}
+.selacts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.selacts .btn{padding:10px 4px;font-weight:600;font-size:13.5px}
+body.selmode .toast{bottom:calc(140px + env(safe-area-inset-bottom,0px))}
+.optlist{display:flex;flex-direction:column;gap:8px}
+.optlist .btn{text-align:left;padding:12px 14px;font-size:15px}
+.optlist .btn small{display:block;color:var(--muted);font-size:12.5px;font-weight:400;margin-top:2px}
 .scrim{position:fixed;inset:0;background:rgba(10,18,15,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
 .sheet{background:var(--bg);width:100%;max-width:760px;max-height:94%;overflow-y:auto;border-radius:18px 18px 0 0;
   padding:0 max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
@@ -158,6 +173,10 @@ details summary{cursor:pointer}
   <section class="list" id="list" aria-live="polite"><div class="empty">Dokumente werden geladen …</div></section>
 </div>
 <button class="fab" id="btnAdd" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 12h8"/></svg>Brief erfassen</button>
+<div class="selbar" id="selBar" hidden><div class="in">
+  <div class="selhead"><button type="button" class="btn link" data-sel="cancel">Abbrechen</button><span id="selCount">0 ausgewählt</span><button type="button" class="btn link" data-sel="all" id="selAll">Alle</button></div>
+  <div class="selacts"><button type="button" class="btn" data-sel="status">Status</button><button type="button" class="btn" data-sel="cat">Kategorie</button><button type="button" class="btn" data-sel="share">Teilen</button><button type="button" class="btn danger" data-sel="del">Löschen</button></div>
+</div></div>
 <input type="file" id="pick" accept="image/*,application/pdf" hidden>
 <input type="file" id="cam" accept="image/*" capture="environment" hidden>
 <input type="file" id="pickBackup" accept="application/json,.json" hidden>
@@ -204,7 +223,7 @@ const DEFAULT_CATEGORIES=[
 const DEFAULT_SETTINGS={categories:DEFAULT_CATEGORIES,soonDays:14,calOn:false,remindDays:3,lastBackup:null};
 const STATUS={neu:"Neu",todo:"Zu erledigen",erledigt:"Erledigt"};
 const STATUS_CLS={neu:"s-neu",todo:"s-todo",erledigt:"s-ok"};
-const S={docs:[],deleted:{},trash:[],settings:structuredClone(DEFAULT_SETTINGS),loaded:false,status:"offen",cat:"alle",q:"",edit:null,scan:null};
+const S={docs:[],deleted:{},trash:[],settings:structuredClone(DEFAULT_SETTINGS),loaded:false,status:"offen",cat:"alle",q:"",edit:null,scan:null,sel:null,shown:[]};
 
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -262,7 +281,7 @@ function render(){
   $("#sub").textContent=all.length?`${all.length} Dokument${all.length===1?"":"e"}${S.settings.driveLinked?" · in Google Drive":""}`:"Briefe erfassen und wiederfinden";
   // Fristen
   const due=all.map(d=>({d,i:dueInfo(d)})).filter(x=>x.i&&x.i.soon).sort((a,b)=>a.d.deadline.localeCompare(b.d.deadline));
-  const box=$("#dueBox");box.hidden=!due.length||!!S.q;
+  const box=$("#dueBox");box.hidden=!due.length||!!S.q||!!S.sel;
   if(due.length)box.innerHTML=`<h2>Bald fällig</h2>`+due.slice(0,6).map(({d,i})=>`<button type="button" class="due-item${i.over?" over":""}" data-id="${d.id}">
       <span style="min-width:0"><span class="t">${esc(d.sender||"Unbekannt")}</span><br><span class="s">${esc(d.deadlineKind||"Frist")}: ${esc(d.subject||"")}</span></span>
       <span class="d">${dfmt(d.deadline)}<br><span class="s">${i.text}</span></span></button>`).join("")+(due.length>6?`<span class="s" style="font-size:12.5px;opacity:.85">und ${due.length-6} weitere</span>`:"");
@@ -276,6 +295,9 @@ function render(){
   // Liste
   let rows=all.filter(d=>(S.q?true:stF(d))&&(S.cat==="alle"||d.category===S.cat)&&matchQ(d,S.q));
   rows.sort((a,b)=>docDate(b).localeCompare(docDate(a))||(b.createdAt||"").localeCompare(a.createdAt||""));
+  S.shown=rows.map(d=>d.id);
+  if(S.sel){const ids=new Set(all.map(d=>d.id));for(const id of [...S.sel])if(!ids.has(id))S.sel.delete(id)}
+  updateSelBar();
   const list=$("#list");
   if(!all.length){list.innerHTML=`<div class="empty">Noch keine Dokumente.<br>Tippe auf „Brief erfassen“ und fotografiere den ersten Brief.</div>`;return}
   if(!rows.length){list.innerHTML=`<div class="empty">${S.q?"Nichts gefunden.":"Keine Dokumente in dieser Ansicht."}</div>`;return}
@@ -283,8 +305,9 @@ function render(){
   for(const d of rows){
     const y=docDate(d).slice(0,4);if(y!==year){year=y;html+=`<div class="year">${y}</div>`}
     const i=dueInfo(d),sn=S.q?snippet(d,S.q):"";
-    html+=`<button type="button" class="card" data-id="${d.id}">
-      ${d.thumbId?`<img class="th" data-thumb="${d.thumbId}" alt="">`:`<span class="th ph">${ICON_DOC}</span>`}
+    const on=S.sel?.has(d.id);
+    html+=`<button type="button" class="card${on?" sel":""}" data-id="${d.id}"${S.sel?` aria-pressed="${!!on}"`:""}>
+      ${S.sel?`<span class="ck" aria-hidden="true">✓</span>`:""}${d.thumbId?`<img class="th" data-thumb="${d.thumbId}" alt="">`:`<span class="th ph">${ICON_DOC}</span>`}
       <span class="body">
         <span class="r1"><span class="snd">${esc(d.sender||"Unbekannter Absender")}</span><span class="dt">${dfmt(docDate(d))}</span></span>
         <span class="sbj">${esc(d.subject||"Ohne Betreff")}</span>
@@ -297,7 +320,18 @@ function render(){
 }
 $("#statusChips").addEventListener("click",e=>{const b=e.target.closest("[data-status]");if(!b)return;S.status=b.dataset.status;render()});
 $("#catChips").addEventListener("click",e=>{const b=e.target.closest("[data-cat]");if(!b)return;S.cat=b.dataset.cat;render()});
-$("#list").addEventListener("click",e=>{const b=e.target.closest("[data-id]");if(b)openView(b.dataset.id)});
+/* Mehrfachauswahl: langes Drücken startet die Auswahl, danach Antippen zum Hinzufügen/Entfernen */
+const LP={t:null,x:0,y:0,fired:false};
+$("#list").addEventListener("pointerdown",e=>{LP.fired=false;clearTimeout(LP.t);const b=e.target.closest(".card[data-id]");if(!b||S.sel)return;
+  LP.x=e.clientX;LP.y=e.clientY;LP.t=setTimeout(()=>{LP.fired=true;startSel(b.dataset.id)},500)});
+$("#list").addEventListener("pointermove",e=>{if(LP.t&&Math.hypot(e.clientX-LP.x,e.clientY-LP.y)>10){clearTimeout(LP.t);LP.t=null}});
+["pointerup","pointercancel"].forEach(ev=>$("#list").addEventListener(ev,()=>{clearTimeout(LP.t);LP.t=null}));
+$("#list").addEventListener("contextmenu",e=>{const b=e.target.closest(".card[data-id]");if(!b)return;e.preventDefault();
+  if(!S.sel&&!LP.fired){clearTimeout(LP.t);LP.fired=true;startSel(b.dataset.id)}});
+$("#list").addEventListener("click",e=>{const b=e.target.closest("[data-id]");if(!b)return;
+  if(LP.fired){LP.fired=false;return}
+  if(S.sel){toggleSel(b.dataset.id);return}
+  openView(b.dataset.id)});
 $("#dueBox").addEventListener("click",e=>{const b=e.target.closest("[data-id]");if(b)openView(b.dataset.id)});
 $("#btnAdd").addEventListener("click",()=>startCapture());
 $("#btnSettings").addEventListener("click",()=>openSettings());
@@ -645,16 +679,144 @@ async function openView(id){
       case "st":d.status=b.dataset.s;d.updatedAt=new Date().toISOString();await dbPut("docs",d);render();scheduleSync();return openView(d.id);
       case "del":{
         if(!confirm("Dokument löschen? Die Datei in Google Drive kommt in den Papierkorb."))return;
-        S.deleted[d.id]=new Date().toISOString();await dbPut("meta",{key:"deleted",items:S.deleted});
-        if(d.driveId)S.trash.push({kind:"file",id:d.driveId});if(d.calId)S.trash.push({kind:"cal",id:d.calId});
-        await dbPut("meta",{key:"trash",items:S.trash});
-        S.docs=S.docs.filter(x=>x.id!==d.id);await dbDel("docs",d.id);
-        for(const fid of [d.fileId,d.thumbId])if(fid)await dbDel("files",fid).catch(()=>{});
+        await deleteDocs([d]);
         closeSheet();render();toast("Gelöscht");scheduleSync();return;
       }
     }
   });
 }
+
+/* ================= Löschen (einzeln und mehrere) ================= */
+async function deleteDocs(list){
+  const now=new Date().toISOString(),ids=new Set(list.map(d=>d.id));
+  for(const d of list){
+    S.deleted[d.id]=now;
+    if(d.driveId)S.trash.push({kind:"file",id:d.driveId});if(d.calId)S.trash.push({kind:"cal",id:d.calId});
+    await dbDel("docs",d.id);
+    for(const fid of [d.fileId,d.thumbId])if(fid)await dbDel("files",fid).catch(()=>{});
+  }
+  await dbPut("meta",{key:"deleted",items:S.deleted});
+  await dbPut("meta",{key:"trash",items:S.trash});
+  S.docs=S.docs.filter(x=>!ids.has(x.id));
+}
+
+/* ================= Mehrfachauswahl ================= */
+function startSel(id){
+  if(S.sel)return;S.sel=new Set(id?[id]:[]);
+  try{navigator.vibrate?.(25)}catch{}
+  try{history.pushState({sel:1},"")}catch{}
+  document.body.classList.add("selmode");render();
+}
+function endSel(fromPop){
+  if(!S.sel)return;S.sel=null;document.body.classList.remove("selmode");render();
+  if(!fromPop&&history.state?.sel)history.back();
+}
+function toggleSel(id){if(!S.sel)return;if(S.sel.has(id))S.sel.delete(id);else S.sel.add(id);render()}
+function selDocs(){return S.sel?live().filter(d=>S.sel.has(d.id)):[]}
+function updateSelBar(){
+  const bar=$("#selBar"),on=!!S.sel;bar.hidden=!on;$("#btnAdd").hidden=on;if(!on)return;
+  const n=S.sel.size;$("#selCount").textContent=`${n} ausgewählt`;
+  const allOn=S.shown.length>0&&S.shown.every(id=>S.sel.has(id));
+  $("#selAll").textContent=allOn?"Keine":"Alle";
+  bar.querySelectorAll(".selacts .btn").forEach(b=>b.disabled=!n);
+}
+const nBriefe=n=>`${n} Brief${n===1?"":"e"}`;
+$("#selBar").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-sel]");if(!b||!S.sel)return;
+  switch(b.dataset.sel){
+    case "cancel":return endSel();
+    case "all":{const allOn=S.shown.every(id=>S.sel.has(id));S.shown.forEach(id=>allOn?S.sel.delete(id):S.sel.add(id));return render()}
+    case "status":return bulkStatus();
+    case "cat":return bulkCategory();
+    case "share":return bulkShare();
+    case "del":{
+      const list=selDocs();if(!list.length)return;
+      if(!confirm(`${nBriefe(list.length)} löschen? Die Dateien in Google Drive kommen in den Papierkorb.`))return;
+      await deleteDocs(list);endSel();render();toast(`${nBriefe(list.length)} gelöscht`);scheduleSync();return;
+    }
+  }
+});
+async function bulkApply(fn,msg){
+  const list=selDocs(),now=new Date().toISOString();
+  for(const d of list){fn(d);d.updatedAt=now;await dbPut("docs",d)}
+  closeSheet();endSel();render();toast(msg(list.length));scheduleSync();
+}
+function bulkStatus(){
+  const n=S.sel.size;S.edit={mode:"bulk",urls:[]};
+  sheet(`Status für ${nBriefe(n)}`,`<div class="sec"><div class="seg">${Object.entries(STATUS).map(([k,l])=>`<button type="button" class="${k}" data-act="bst" data-s="${k}">${l}</button>`).join("")}</div></div>`,
+    `<button type="button" class="btn" data-act="close">Abbrechen</button>`);
+  $("#scrim").addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(!b)return;
+    if(b.dataset.act==="close")return closeSheet();
+    if(b.dataset.act==="bst"){const s=b.dataset.s;b.disabled=true;return bulkApply(d=>{d.status=s},k=>`${nBriefe(k)}: ${STATUS[s]}`)}});
+}
+function bulkCategory(){
+  const n=S.sel.size;S.edit={mode:"bulk",urls:[]};
+  sheet(`Kategorie für ${nBriefe(n)}`,`<div class="sec"><div class="optlist">${catNames().map(c=>`<button type="button" class="btn" data-act="bcat" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>
+    ${S.settings.driveLinked?`<div class="status">Die PDFs werden in Google Drive in den passenden Ordner verschoben.</div>`:""}</div>`,
+    `<button type="button" class="btn" data-act="close">Abbrechen</button>`);
+  $("#scrim").addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(!b)return;
+    if(b.dataset.act==="close")return closeSheet();
+    if(b.dataset.act==="bcat"){const c=b.dataset.c;b.disabled=true;return bulkApply(d=>{d.category=c},k=>`${nBriefe(k)} nach „${c}“ verschoben`)}});
+}
+/* ---- Teilen: einzelne PDFs oder ein zusammengefasstes PDF (wird auf dem Handy erzeugt) ---- */
+const PDFLIB="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+async function mergePdfs(blobs){
+  await loadLib(PDFLIB,()=>!!window.PDFLib);
+  const out=await PDFLib.PDFDocument.create();
+  for(const b of blobs){
+    const pdf=(b.type||"").startsWith("image/")?await toPdf(b):b;
+    const src=await PDFLib.PDFDocument.load(await pdf.arrayBuffer(),{ignoreEncryption:true});
+    (await out.copyPages(src,src.getPageIndices())).forEach(p=>out.addPage(p));
+  }
+  return new Blob([await out.save()],{type:"application/pdf"});
+}
+async function shareFiles(files,title){
+  if(navigator.canShare?.({files})){await navigator.share({files,title});return}
+  for(const f of files){const u=URL.createObjectURL(f);const a=document.createElement("a");a.href=u;a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),5000)}
+}
+function bulkShare(){
+  const list=selDocs().sort((a,b)=>docDate(a).localeCompare(docDate(b))),n=list.length;if(!n)return;
+  S.edit={mode:"bulk",urls:[]};let ready=null;
+  sheet(`${nBriefe(n)} teilen`,`<div class="sec"><div class="optlist">
+      <button type="button" class="btn" data-act="mode" data-m="single">Einzelne PDFs<small>Jeder Brief bleibt eine eigene Datei.</small></button>
+      <button type="button" class="btn" data-act="mode" data-m="merge">Ein zusammengefasstes PDF<small>Alle Briefe hintereinander, nach Datum sortiert.</small></button>
+    </div><div id="edStatus" class="status"></div>
+    <div class="btnrow" id="shareGoRow" hidden><button type="button" class="btn primary" data-act="go">Jetzt teilen</button></div></div>`,
+    `<button type="button" class="btn" data-act="close">Abbrechen</button>`);
+  const go=async()=>{
+    try{await shareFiles(ready.files,ready.title);closeSheet();endSel();if(ready.miss)toast(`${ready.miss} Datei${ready.miss===1?"":"en"} nicht verfügbar und ausgelassen`)}
+    catch(err){if(err?.name==="AbortError")return;$("#shareGoRow").hidden=false;setStatus("Bereit. Tippe auf „Jetzt teilen“.")}
+  };
+  $("#scrim").addEventListener("click",async e=>{const b=e.target.closest("[data-act]");if(!b)return;
+    if(b.dataset.act==="close")return closeSheet();
+    if(b.dataset.act==="go"&&ready)return go();
+    if(b.dataset.act!=="mode"||S.edit?.busy)return;
+    S.edit.busy=true;$("#shareGoRow").hidden=true;ready=null;
+    $("#scrim").querySelectorAll("[data-act=mode]").forEach(x=>x.disabled=true);
+    try{
+      const blobs=[],used=new Set(),files=[];let miss=0;
+      for(let i=0;i<n;i++){
+        setStatus(`Datei ${i+1} von ${n} wird geladen …`);
+        const bl=await docBlob(list[i]).catch(()=>null);if(!bl){miss++;continue}
+        blobs.push({d:list[i],bl});
+      }
+      if(!blobs.length){setStatus("Keine der Dateien ist verfügbar. Sie sind nicht auf diesem Handy und Google Drive ist nicht verbunden.",true);return}
+      if(b.dataset.m==="merge"){
+        setStatus("PDF wird zusammengefasst …");
+        const m=await mergePdfs(blobs.map(x=>x.bl));
+        files.push(new File([m],`Dokumente_${today()}_${blobs.length}_Briefe.pdf`,{type:"application/pdf"}));
+      }else for(const {d,bl} of blobs){
+        let name=d.name||fileName(d),k=2;while(used.has(name))name=name.replace(/(_\d+)?\.pdf$/i,`_${k++}.pdf`);used.add(name);
+        files.push(new File([bl],name,{type:bl.type||"application/pdf"}));
+      }
+      ready={files,title:nBriefe(blobs.length),miss};
+      setStatus(miss?`${miss} Datei${miss===1?"":"en"} nicht verfügbar und ausgelassen.`:"",!!miss);
+      await go();
+    }catch(err){setStatus(b.dataset.m==="merge"?"Zusammenfassen nicht möglich (offline?). Einzelne PDFs gehen weiterhin.":"Teilen nicht möglich.",true)}
+    finally{if(S.edit)S.edit.busy=false;$("#scrim")?.querySelectorAll("[data-act=mode]").forEach(x=>x.disabled=false)}
+  });
+}
+window.addEventListener("popstate",()=>{if(S.sel&&!history.state?.sel)endSel(true)});
 
 /* ================= Einstellungen & Sicherung ================= */
 async function saveSettings(){S.settings.updatedAt=new Date().toISOString();await dbPut("meta",{key:"settings",...S.settings});scheduleSync()}
