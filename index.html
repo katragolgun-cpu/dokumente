@@ -800,7 +800,7 @@ async function deleteDocs(list){
   const now=new Date().toISOString(),ids=new Set(list.map(d=>d.id));
   for(const d of list){
     S.deleted[d.id]=now;
-    if(d.driveId)S.trash.push({kind:"file",id:d.driveId});if(d.calId)S.trash.push({kind:"cal",id:d.calId});
+    if(d.driveId)S.trash.push({kind:"file",id:d.driveId});for(const a of d.attachments||[])if(a.driveId)S.trash.push({kind:"file",id:a.driveId});if(d.calId)S.trash.push({kind:"cal",id:d.calId});
     await dbDel("docs",d.id);
     for(const fid of [d.fileId,d.thumbId])if(fid)await dbDel("files",fid).catch(()=>{});
   }
@@ -1580,6 +1580,11 @@ async function syncNow(){
         try{await moveFile(d.driveId,target,name);d.folder=target;d.name=name;d.updatedAt=new Date().toISOString()}
         catch(e){if(e.code==="auth")throw e;glog("Verschieben nicht möglich: "+(d.name||d.driveId))}
       }
+      if(d.driveId)for(const [i,a] of (d.attachments||[]).entries()){
+        const an=name.replace(/\.pdf$/,`_Anlage-${i+1}.pdf`);if(!a.driveId||(a.folder===target&&a.dname===an))continue;
+        try{await moveFile(a.driveId,target,an);a.folder=target;a.dname=an;d.updatedAt=new Date().toISOString()}
+        catch(e){if(e.code==="auth")throw e;if(e.code==="gone"){a.folder=target;a.dname=an}glog("Anlage nicht verschiebbar: "+(a.name||a.driveId))}
+      }
     }
     await calSync(map);
     // Gelöschte: Dateien in den Papierkorb, Termine entfernen
@@ -1726,6 +1731,48 @@ async function runImport(){
   finally{G.importing=false;importStatus("");render();scheduleSync()}
 }
 
+/* ================= Umsortieren per Liste (dokumente-umsortieren.json, von Claude) ================= */
+const RESORT_NAME="dokumente-umsortieren.json";
+async function checkResort(){
+  if(G.resortAsked||!tokenValid()||!hasDriveFull()||S.edit)return;G.resortAsked=true;
+  let fileId,data;
+  try{const r=await (await gfetch(`${API}?q=${q(`name='${RESORT_NAME}' and trashed=false`)}&fields=files(id)`)).json();
+    fileId=r.files?.[0]?.id;if(!fileId)return;data=await (await gfetch(`${API}/${fileId}?alt=media`)).json()}
+  catch(e){glog("Umsortier-Liste nicht lesbar: "+(e?.message||e));return}
+  const byDrive=new Map(live().filter(d=>d.driveId).map(d=>[d.driveId,d]));
+  const moves=(data.moves||[]).map(m=>({d:byDrive.get(m.driveId),c:String(m.category||"").trim()})).filter(m=>m.d&&m.c&&m.d.category!==m.c);
+  const tids=[...new Set(data.trash||[])],trash=tids.map(id=>byDrive.get(id)).filter(Boolean);
+  // Dateien ohne Brief in der App (z. B. doppelte Kopie): nur die Datei in den Drive-Papierkorb
+  const orphans=tids.filter(id=>!byDrive.has(id)&&!live().some(d=>(d.attachments||[]).some(a=>a.driveId===id)));
+  const done=async()=>{try{await gfetch(`${API}/${fileId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:`dokumente-umsortieren-erledigt-${today()}.json`})})}catch{}};
+  const miss=(data.moves||[]).length+tids.length-moves.length-trash.length-orphans.length;
+  if(!moves.length&&!trash.length&&!orphans.length){glog("Umsortier-Liste: nichts zu tun");return done()}
+  S.edit={mode:"resort",urls:[]};
+  const cats=[...new Set(moves.map(m=>m.c))].sort((a,b)=>a.localeCompare(b,"de"));
+  sheet("Umsortieren",`<div id="edStatus" class="status" style="margin-top:10px"></div>
+    <div class="sec"><p style="margin:0"><b>${nBriefe(moves.length)} verschieben${trash.length?`, ${nBriefe(trash.length)} in den Papierkorb`:""}${orphans.length?`, ${orphans.length} doppelte Datei${orphans.length===1?"":"en"} in den Papierkorb`:""}.</b> Ausführen?</p>
+    ${data.note?`<p class="status">${esc(data.note)}</p>`:""}</div>
+    <div class="sec"><h3>Ziele</h3><div class="status">${cats.map(c=>`${esc(c)}: ${moves.filter(m=>m.c===c).length}`).join("<br>")}</div>
+    ${trash.length?`<h3 style="margin-top:12px">Papierkorb</h3><div class="status">${trash.map(d=>esc(`${dfmt(d.letterDate)} ${d.sender} – ${d.subject}`)).join("<br>")}</div>`:""}
+    ${miss>0?`<div class="status">${miss} Einträge der Liste passen nicht (schon erledigt oder Brief nicht gefunden).</div>`:""}</div>`,
+    `<button type="button" class="btn" data-act="later">Später</button><button type="button" class="btn primary" data-act="run">Ausführen</button>`);
+  $("#scrim").addEventListener("click",async e=>{const b=e.target.closest("[data-act]");if(!b||b.disabled)return;
+    if(b.dataset.act==="later")return closeSheet();
+    if(b.dataset.act!=="run")return;
+    $("#scrim").querySelectorAll("button").forEach(x=>x.disabled=true);setStatus("Wird ausgeführt …");
+    try{
+      const nm={};for(const c of [...new Set([...(data.categories||[]),...cats])])nm[c]=await createCategory(c);
+      const now=new Date().toISOString();
+      for(const m of moves){m.d.category=nm[m.c]||m.c;m.d.updatedAt=now;await dbPut("docs",m.d)}
+      if(trash.length)await deleteDocs(trash);
+      if(orphans.length){for(const id of orphans)S.trash.push({kind:"file",id});await dbPut("meta",{key:"trash",items:S.trash})}
+      await done();glog(`Umsortiert: ${moves.length} verschoben, ${trash.length} gelöscht`);
+      closeSheet();render();toast(`${nBriefe(moves.length)} umsortiert. Drive wird abgeglichen.`);scheduleSync();
+    }catch(err){if(err.code==="auth"){closeSheet();return connectDrive(true)}setStatus("Umsortieren fehlgeschlagen. Bitte später erneut öffnen.",true);G.resortAsked=false;
+      $("#scrim").querySelectorAll("button").forEach(x=>x.disabled=false)}
+  });
+}
+
 /* ================= Start ================= */
 (async()=>{
   render();
@@ -1744,7 +1791,7 @@ async function runImport(){
     toast(AUTH.error==="access_denied"?"Anmeldung abgebrochen":"Anmeldung bei Google fehlgeschlagen ("+AUTH.error+")");
   }
   if(AUTH?.token)toast(S.settings.calOn?"Mit Google Drive und Kalender verbunden":"Mit Google Drive verbunden");
-  if(S.settings.driveLinked&&tokenValid())syncNow().then(()=>{if(S.settings.importMode&&fullScope())runImport()});
+  if(S.settings.driveLinked&&tokenValid())syncNow().then(()=>{if(S.settings.importMode&&fullScope())runImport();else checkResort()});
   if(S.settings.importMode&&AUTH?.token&&!fullScope()){toast("Für den Import bitte Drive- und Gmail-Zugriff erlauben");glog("Import: Zugriff nicht vollständig erlaubt")}
   document.addEventListener("visibilitychange",async()=>{
     if(document.visibilityState!=="visible")return;

@@ -21,7 +21,7 @@ Installierbare Web-App (PWA) für Android. Eingehende Briefe fotografieren, auf 
 ## Daten
 - Auf dem Gerät: IndexedDB mit den Stores `docs`, `files`, `meta`. Kleinkram in `localStorage` (`gtok`, `gscope`, `glog`, `grp` usw.).
 - In Google Drive: `Dokumente/<Kategorie>/<Jahr>/<Datum>_<Absender>_<Betreff>.pdf`, Index-Datei mit allen Metadaten und OCR-Text, tägliche Sicherungen unter `_App-Daten/Sicherungen`.
-- Google-Anmeldung per OAuth-Token-Flow im Browser (`GOOGLE_CLIENT_ID` in `index.html`, Cloud-Projekt 592336920931). Normal nur `drive.file` und `calendar.events`; voller Drive- und Gmail-Lesezugriff nur für den einmaligen Import.
+- Google-Anmeldung per OAuth-Token-Flow im Browser (`GOOGLE_CLIENT_ID` in `index.html`, Cloud-Projekt 592336920931). Voller Drive-Zugriff (`drive`, seit v14 für Eingang und Kategorie-Ordner) und `calendar.events`; Gmail-Lesezugriff nur für den einmaligen Import. Umsortieren per Liste `dokumente-umsortieren.json` (siehe Konzept Punkt 14).
 
 ## Regeln für Änderungen
 - Bei jeder Änderung an App-Dateien `VERSION` in `sw.js` um eins erhöhen (z. B. `v12` -> `v13`). Sonst bekommt das Handy das Update nicht.
