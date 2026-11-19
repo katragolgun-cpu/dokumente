@@ -4,8 +4,7 @@
 async function saveSettings(){S.settings.updatedAt=new Date().toISOString();await dbPut("meta",{key:"settings",...S.settings});scheduleSync()}
 function openSettings(){
   const s=S.settings;S.edit={mode:"settings",urls:[]};
-  const catRows=s.categories.map((c,i)=>`<div class="catrow">
-      <label class="f">Name<input id="cn${i}" value="${esc(c.name)}"></label></div>`).join("");
+  const catRows=`<div class="optlist">${s.categories.map((c,i)=>`<button type="button" class="btn catbtn" data-act="ren" data-i="${i}"><span>${esc(c.name)}</span><span class="c">${live().filter(d=>d.category===c.name).length}</span></button>`).join("")}</div>`;
   sheet("Einstellungen",`
     <div id="edStatus" class="status" style="margin-top:10px"></div>
     <div class="sec"><h3>Google Drive</h3>
@@ -14,25 +13,26 @@ function openSettings(){
         :"Nach dem Verbinden liegen alle Briefe als PDF im Drive-Ordner „Dokumente“."}</p>
       <p class="status" id="driveStatus" style="margin:0;font-weight:600"></p>
       <div class="btnrow">${s.driveLinked
-        ?`<button type="button" class="btn primary" data-act="sync">Jetzt abgleichen</button><button type="button" class="btn" data-act="resort">Umsortier-Liste prüfen</button><button type="button" class="btn" data-act="unlink">Drive trennen</button>`
+        ?`<button type="button" class="btn primary" data-act="sync">Jetzt abgleichen</button>`
         :`<button type="button" class="btn primary" data-act="link">Mit Google Drive verbinden</button>`}</div>
-      <details><summary class="status">Verlauf anzeigen</summary><pre class="status" style="white-space:pre-wrap;margin:6px 0 0;font-size:12px">${esc((()=>{try{return JSON.parse(localStorage.getItem("glog")||"[]").join("\n")}catch{return ""}})()||"Noch keine Einträge.")}</pre></details></div>
+</div>
     <div class="sec"><h3>Fristen</h3>
       <p class="status" style="margin:0">${s.calOn
         ?"Jede Frist steht als ganztägiger Termin in deinem Google Kalender, mit Erinnerung."+(G.calErr?" <b>Kalender ist gerade nicht erreichbar.</b>":"")
         :"Optional: Fristen als Termin mit Erinnerung in den Google Kalender eintragen. Erledigte Briefe werden dort wieder entfernt."}</p>
       <div class="grid2">${field("Erinnerung (Tage vorher)","remD",s.remindDays??3,"number","",'min="1" max="27"')}${field("„Bald fällig“ ab (Tage)","soonD",s.soonDays??14,"number","",'min="1" max="90"')}</div>
       <div class="btnrow">${s.calOn?`<button type="button" class="btn" data-act="caloff">Kalender ausschalten</button>`:`<button type="button" class="btn" data-act="calon">Google Kalender einbinden</button>`}</div></div>
-    <div class="sec"><h3>Import aus Drive und Gmail</h3>
-      <p class="status" style="margin:0">${s.lastImport?`Letzter Import am ${dfmt(s.lastImport.date)}: ${s.lastImport.ok} Dokumente übernommen${s.lastImport.fail?.length?`, ${s.lastImport.fail.length} fehlgeschlagen (Liste bleibt für einen neuen Versuch erhalten)`:""}.`
-        :"Übernimmt vorhandene Briefe aus deinem Google Drive und Gmail anhand der Importliste „dokumente-import.json“. Dafür fragt Google einmalig nach Lesezugriff auf Drive und Gmail. Die Originale bleiben unverändert, die App legt Kopien im Ordner „Dokumente“ an."}</p>
-      <div class="btnrow"><button type="button" class="btn" data-act="import">${s.importMode?"Import fortsetzen":"Import starten"}</button></div></div>
     <div class="sec"><h3>Kategorien</h3>
-      <p class="status" style="margin:0">Kategorien sind die Ordner in „Dokumente“ in Google Drive. Neue Kategorie beim Verarbeiten eines Scans anlegen oder direkt in Drive. Umbenennen hier benennt auch den Ordner in Drive um.</p>
+      <p class="status" style="margin:0">Kategorien sind die Ordner in „Dokumente“ in Google Drive. Neue Kategorie beim Verarbeiten eines Scans anlegen oder direkt in Drive. Antippen zum Umbenennen, dabei wird auch der Ordner in Drive umbenannt.</p>
       ${catRows}</div>
-    <div class="sec"><h3>Sicherung als Datei</h3>
-      <p class="status" style="margin:0">Enthält alle Angaben und den erkannten Text, ohne PDFs.${s.lastBackup?` Letzte: ${dfmt(s.lastBackup.slice(0,10))}.`:""}</p>
-      <div class="btnrow"><button type="button" class="btn" data-act="backup">Sicherung erstellen</button><button type="button" class="btn" data-act="restore">Sicherung einspielen</button></div></div>
+    <div class="sec"><details><summary><h3 style="display:inline">Erweitert</h3></summary>
+      <h3 style="margin-top:14px">Verlauf</h3>
+      <pre class="status" style="white-space:pre-wrap;margin:6px 0 0;font-size:12px">${esc((()=>{try{return JSON.parse(localStorage.getItem("glog")||"[]").join("\n")}catch{return ""}})()||"Noch keine Einträge.")}</pre>
+      <h3 style="margin-top:14px">Sicherung als Datei</h3>
+      <p class="status" style="margin:0">Zusätzlich zur täglichen Sicherung in Drive. Enthält alle Angaben und den erkannten Text, ohne PDFs.${s.lastBackup?` Letzte: ${dfmt(s.lastBackup.slice(0,10))}.`:""}</p>
+      <div class="btnrow"><button type="button" class="btn" data-act="backup">Sicherung erstellen</button><button type="button" class="btn" data-act="restore">Sicherung einspielen</button></div>
+      ${s.driveLinked?`<h3 style="margin-top:14px">Werkzeuge</h3><div class="btnrow"><button type="button" class="btn" data-act="resort">Umsortier-Liste prüfen</button><button type="button" class="btn danger" data-act="unlink">Drive trennen</button></div>`:""}
+    </details></div>
   `,`<button type="button" class="btn" data-act="close">Abbrechen</button><button type="button" class="btn primary" data-act="save">Speichern</button>`);
   updateChip();
   $("#scrim").addEventListener("click",async e=>{
@@ -40,25 +40,41 @@ function openSettings(){
     switch(b.dataset.act){
       case "close":return closeSheet();
       case "link":closeSheet();return connectDrive();
-      case "unlink":S.settings.driveLinked=false;G.token=null;try{localStorage.removeItem("gtok")}catch{};await dbPut("meta",{key:"settings",...S.settings});closeSheet();render();updateChip();return toast("Drive getrennt. Die Dateien bleiben in Drive.");
+      case "unlink":if(!confirm("Drive wirklich trennen? Die App gleicht dann nichts mehr ab."))return;S.settings.driveLinked=false;G.token=null;try{localStorage.removeItem("gtok")}catch{};await dbPut("meta",{key:"settings",...S.settings});closeSheet();render();updateChip();return toast("Drive getrennt. Die Dateien bleiben in Drive.");
       case "sync":if(!tokenValid()){closeSheet();return connectDrive(true)}await syncNow();if(S.edit?.mode==="settings")openSettings();return;
       case "resort":if(!tokenValid()){closeSheet();return connectDrive(true)}closeSheet();G.resortAsked=false;await checkResort();if(!S.edit)toast("Keine Umsortier-Liste gefunden");return;
-      case "import":collectSettings();S.settings.importMode=true;await saveSettings();closeSheet();if(fullScope()&&tokenValid())return runImport();return connectDrive(false);
       case "calon":collectSettings();S.settings.calOn=true;await saveSettings();closeSheet();return connectDrive(false);
       case "caloff":collectSettings();S.settings.calOn=false;await saveSettings();return openSettings();
       case "backup":return makeBackup();
+      case "ren":collectSettings();return renameCategory(+b.dataset.i);
       case "restore":{const p=$("#pickBackup");p.value="";p.onchange=()=>{const f=p.files[0];if(f)restoreBackup(f)};p.click();return}
-      case "save":{
-        const old=S.settings.categories.map(c=>c.name);collectSettings();
-        // Umbenannte Kategorien in den Dokumenten nachziehen
-        const now=S.settings.categories.map(c=>c.name);
-        for(let i=0;i<Math.min(old.length,now.length);i++)if(old[i]!==now[i]){
-          await renameCatFolder(old[i],now[i]);
-          for(const d of S.docs)if(d.category===old[i]){d.category=now[i];d.updatedAt=new Date().toISOString();await dbPut("docs",d)}}
-        await saveSettings();closeSheet();render();return toast("Gespeichert");
-      }
+      case "save":collectSettings();await saveSettings();closeSheet();render();return toast("Gespeichert");
     }
   });
+}
+// Kategorie umbenennen: Ordner in Drive, Briefe und Liste
+function renameCategory(i){
+  const old=S.settings.categories[i]?.name;if(old==null)return;S.edit={mode:"rename",urls:[]};
+  sheet("Kategorie umbenennen",`<div id="edStatus" class="status" style="margin-top:10px"></div>
+    <div class="sec"><label class="f">Neuer Name<input id="rnName" value="${esc(old)}" autocomplete="off" enterkeyhint="done"></label>
+    <div class="status">${live().filter(d=>d.category===old).length} Briefe. Der Ordner in Drive wird mit umbenannt.</div></div>`,
+    `<button type="button" class="btn" data-act="back">Abbrechen</button><button type="button" class="btn primary" data-act="ok">Umbenennen</button>`);
+  const inp=$("#rnName");inp.focus();inp.select();
+  const go=async()=>{
+    const nn=inp.value.replace(/\s+/g," ").trim();if(nn===old)return openSettings();
+    if(!nn)return setStatus("Bitte einen Namen eingeben.",true);
+    if(/[\\/:*?"<>|#%]/.test(nn))return setStatus("Bitte keine Zeichen wie / : * ? \" < > | # % verwenden.",true);
+    if(NOCAT.has(nn))return setStatus(`„${nn}“ ist für die App reserviert.`,true);
+    if(S.settings.categories.some((c,k)=>k!==i&&fold(c.name)===fold(nn)))return setStatus("Diese Kategorie gibt es schon.",true);
+    $("#scrim").querySelectorAll("button").forEach(x=>x.disabled=true);setStatus("Wird umbenannt …");
+    const ok=await renameCatFolder(old,nn);const now=new Date().toISOString();
+    S.settings.categories[i].name=nn;S.settings.categories.sort((a,b)=>a.name.localeCompare(b.name,"de"));
+    for(const d of S.docs)if(d.category===old){d.category=nn;if(ok)d.placeKey=placeKey(d);d.updatedAt=now;await dbPut("docs",d)}
+    if(S.cat===old)S.cat=nn;
+    await saveSettings();render();openSettings();toast(ok?`Umbenannt in „${nn}“`:`Umbenannt. Der Ordner wird beim nächsten Abgleich angepasst.`);
+  };
+  inp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();go()}});
+  $("#scrim").addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(!b||b.disabled)return;if(b.dataset.act==="back")return openSettings();if(b.dataset.act==="ok")go()});
 }
 function collectSettings(){
   const s=S.settings;

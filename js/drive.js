@@ -182,11 +182,11 @@ async function refreshCats(){
 }
 async function renameCatFolder(a,b){
   const s=S.settings,fa=folderName(a),fb=folderName(b),id=s.driveFolderMap?.["/"+fa];
-  if(fa===fb||!id||!tokenValid())return;
+  if(fa===fb)return true;if(!id||!tokenValid())return false;
   try{await gfetch(`${API}/${id}?fields=id`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:fb})});
     for(const k of Object.keys(s.driveFolderMap))if(k==="/"+fa||k.startsWith("/"+fa+"/")){s.driveFolderMap["/"+fb+k.slice(fa.length+1)]=s.driveFolderMap[k];delete s.driveFolderMap[k]}
-    glog("Ordner umbenannt: "+fa+" -> "+fb)}
-  catch(e){glog("Ordner umbenennen nicht möglich: "+fa);toast("Ordner in Drive konnte nicht umbenannt werden")}
+    glog("Ordner umbenannt: "+fa+" -> "+fb);return true}
+  catch(e){glog("Ordner umbenennen nicht möglich: "+fa);return false}
 }
 async function createCategory(raw){
   const name=String(raw||"").replace(/\s+/g," ").trim();

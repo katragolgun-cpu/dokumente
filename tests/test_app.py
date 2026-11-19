@@ -62,7 +62,7 @@ class FakeDrive:
             ps = re.findall(r"'([^']+)' in parents", q)
             if ps: res = [f for f in res if any(x in f.get("parents", []) for x in ps)]
             n = re.search(r"name='([^']*)'", q)
-            if n: res = [f for f in res if f["name"] == n.group(1)]
+            if n: res = [f for f in res if f.get("name") == n.group(1)]
             if "mimeType='application/vnd.google-apps.folder'" in q: res = [f for f in res if f.get("mimeType") == "folder"]
             if "mimeType='application/pdf'" in q: res = [f for f in res if f.get("mimeType") == "application/pdf"]
             if "trashed=false" in q: res = [f for f in res if not f.get("trashed")]
@@ -231,10 +231,29 @@ def test_drive_ist_wahrheit(p):
     check(not errs, "keine JavaScript-Fehler " + str(errs))
     b.close()
 
+def test_einstellungen(p):
+    print("Einstellungen: Kategorien umbenennen, Import entfernt")
+    docs = [doc(1), doc(2)]
+    files = FOLDERS + [{"id": x["driveId"], "name": x["name"], "parents": ["C_AUTO24"]} for x in docs]
+    dr = FakeDrive(files); b, pg, errs = run(p, dr, docs)
+    pg.click("#btnSettings"); pg.wait_for_timeout(500)
+    check(pg.locator("text=Import aus Drive und Gmail").count() == 0, "Import-Bereich entfernt")
+    check(pg.locator("[data-act=ren]").count() == 2, "Kategorien als Liste")
+    pg.click("[data-act=ren][data-i='0']"); pg.wait_for_timeout(300)
+    pg.fill("#rnName", "Steuern"); pg.click("[data-act=ok]"); pg.wait_for_timeout(300)
+    check("gibt es schon" in pg.inner_text("#edStatus"), "doppelter Name abgelehnt")
+    pg.fill("#rnName", "Fahrzeuge"); pg.click("[data-act=ok]"); pg.wait_for_timeout(1500)
+    check(dr.files["C_AUTO"]["name"] == "Fahrzeuge", "Ordner in Drive umbenannt")
+    check(pg.evaluate("S.docs.every(d=>d.category==='Fahrzeuge')"), "Briefe umbenannt")
+    dr.calls.clear(); pg.evaluate("closeSheet();syncNow()"); pg.wait_for_timeout(2500)
+    check(not any("addParents" in c for c in dr.calls), "kein unnötiges Verschieben nach Umbenennen")
+    check(not errs, "keine JavaScript-Fehler " + str(errs))
+    b.close()
+
 if __name__ == "__main__":
     srv = serve()
     with sync_playwright() as p:
-        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit]:
+        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen]:
             try: t(p)
             except Exception as e: check(False, t.__name__ + ": " + repr(e)[:200])
     srv.shutdown()
