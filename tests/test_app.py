@@ -46,7 +46,12 @@ class FakeDrive:
                 if nm: f["name"] = nm.group(1)
             except Exception: pass
             return route.fulfill(json={"id": fid, "webViewLink": "https://drive/" + fid, "md5Checksum": md5})
+        if "/thumbs/" in u:  # Vorschaubild (in echt lh3.googleusercontent.com)
+            png = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"+"1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+            return route.fulfill(body=png, headers={"content-type": "image/png"})
         mid = re.search(r"/drive/v3/files/([^/?]+)", u)
+        if m == "GET" and mid and "fields=thumbnailLink" in u:
+            return route.fulfill(json={"thumbnailLink": "https://www.googleapis.com/thumbs/" + mid.group(1) + "=s220", "mimeType": "application/pdf", "size": "1000"})
         if m == "GET" and mid and "fields=md5Checksum" in u:
             return route.fulfill(json={"md5Checksum": self.files.get(mid.group(1), {}).get("md5", "x")})
         if m == "GET" and mid and "alt=media" in u:
@@ -250,10 +255,26 @@ def test_einstellungen(p):
     check(not errs, "keine JavaScript-Fehler " + str(errs))
     b.close()
 
+def test_vorschau_und_karten(p):
+    print("Vorschaubilder aus Drive, ruhigere Karten")
+    docs = [doc(1, status="neu", tags=["a", "b", "c"]), doc(2, status="todo", deadline="2030-01-01", deadlineKind="Zahlung"), doc(3, status="erledigt")]
+    files = FOLDERS + [{"id": x["driveId"], "name": x["name"], "parents": ["C_AUTO24"]} for x in docs]
+    dr = FakeDrive(files); b, pg, errs = run(p, dr, docs)
+    pg.wait_for_timeout(2500)
+    check(pg.evaluate("S.docs.every(d=>d.thumbId)"), "alle Briefe haben ein Vorschaubild")
+    pg.evaluate("S.status='alle';render()"); pg.wait_for_timeout(500)
+    check(pg.locator(".card img.th").count() == 3, "Vorschaubilder in der Liste")
+    check(pg.locator(".card.st-todo").count() == 1 and pg.locator(".card .stamp:has-text('Zu erledigen')").count() == 0, "Status als Streifen statt Abzeichen")
+    check(pg.locator(".card[data-id=d1] .tag").count() == 2, "höchstens 2 Schlagwörter je Karte")
+    dr.calls.clear(); pg.evaluate("fillThumbs()"); pg.wait_for_timeout(800)
+    check(not any("thumbnailLink" in c for c in dr.calls), "Vorschaubilder nur einmal laden")
+    check(not errs, "keine JavaScript-Fehler " + str(errs))
+    b.close()
+
 if __name__ == "__main__":
     srv = serve()
     with sync_playwright() as p:
-        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen]:
+        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen, test_vorschau_und_karten]:
             try: t(p)
             except Exception as e: check(False, t.__name__ + ": " + repr(e)[:200])
     srv.shutdown()

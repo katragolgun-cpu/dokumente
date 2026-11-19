@@ -165,6 +165,23 @@ async function adoptDriveState(map){
   if(gone)await dbPut("meta",{key:"deleted",items:S.deleted});
   if(moved||gone)toast([moved&&`${nBriefe(moved)} aus Drive übernommen`,gone&&`${nBriefe(gone)} in Drive gelöscht`].filter(Boolean).join(", "));
 }
+/* ---- Vorschaubilder: für Briefe ohne Vorschau einmalig aus Drive holen ---- */
+async function fillThumbs(){
+  if(G.thumbing||!tokenValid())return;G.thumbing=true;let n=0;
+  try{
+    const todo=[];for(const d of live())if(d.driveId&&!G.noThumb?.has(d.id)&&(!d.thumbId||!await dbGet("files",d.thumbId).catch(()=>null)))todo.push(d);
+    for(const d of todo.slice(0,30)){
+      let blob=null;
+      try{const m=await (await gfetch(`${API}/${d.driveId}?fields=thumbnailLink,size,mimeType`)).json();
+        if(m.thumbnailLink){try{const r=await fetch(m.thumbnailLink.replace(/=s\d+$/,"=s400"));if(r.ok&&/^image\//.test(r.headers.get("content-type")||""))blob=await r.blob()}catch{}}
+        if(!blob&&m.mimeType==="application/pdf"&&+m.size<6e6)blob=await pdfThumb(await (await gfetch(`${API}/${d.driveId}?alt=media`)).blob());
+      }catch(e){if(e.code==="auth")break}
+      if(!blob){(G.noThumb=G.noThumb||new Set()).add(d.id);continue}
+      d.thumbId=await storeFile(blob,"vorschau.jpg");await dbPut("docs",d);n++;
+      if(n%5===0)render();
+    }
+  }finally{G.thumbing=false;if(n){render();glog(`Vorschaubilder geladen: ${n}`)}}
+}
 function stripLocal(d){const c=structuredClone(d);delete c.fileId;delete c.thumbId;return c}
 function scheduleSync(){if(!S.settings.driveLinked)return;G.dirty=true;updateChip();clearTimeout(G.timer);G.timer=setTimeout(syncNow,1500)}
 
@@ -383,6 +400,7 @@ async function syncNow(){
     await dailySnapshot(data);
     await dbPut("meta",{key:"settings",...S.settings});
     try{await refreshCats();await listInbox()}catch(e){if(e.code==="auth")throw e;glog("Eingang/Kategorien nicht lesbar: "+(e?.message||e))}
+    setTimeout(fillThumbs,500);
     checkResort();
     G.last=new Date();glog("Abgleich erfolgreich ("+S.docs.length+" Dokumente)");
   }catch(e){G.err=e.code==="auth"?"auth":"fail";G.dirty=true;glog("Abgleich fehlgeschlagen: "+(e?.message||e))}

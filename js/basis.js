@@ -130,12 +130,12 @@ const ICON_CHEV=`<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="curre
 function cardHtml(d){
   const i=dueInfo(d),sn=S.q?snippet(d,S.q):"";
   const on=S.sel?.has(d.id);
-  return `<button type="button" class="card${on?" sel":""}" data-id="${d.id}"${S.sel?` aria-pressed="${!!on}"`:""}>
+  return `<button type="button" class="card st-${esc(d.status||"neu")}${on?" sel":""}" data-id="${d.id}"${S.sel?` aria-pressed="${!!on}"`:""}>
       ${S.sel?`<span class="ck" aria-hidden="true">✓</span>`:""}${d.thumbId?`<img class="th" data-thumb="${d.thumbId}" alt="">`:`<span class="th ph">${ICON_DOC}</span>`}
       <span class="body">
         <span class="r1"><span class="snd">${esc(d.sender||"Unbekannter Absender")}</span><span class="dt">${dfmt(docDate(d))}</span></span>
         <span class="sbj">${esc(d.subject||"Ohne Betreff")}</span>
-        <span class="meta"><span class="stamp ${STATUS_CLS[d.status]||"s-neu"}">${STATUS[d.status]||"Neu"}</span>${i?`<span class="stamp ${i.over||i.n<=3?"s-bad":"s-todo"}">${esc(d.deadlineKind||"Frist")} ${i.text}</span>`:""}${(d.tags||[]).slice(0,4).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</span>
+        <span class="meta"><span class="vh">Status: ${STATUS[d.status]||"Neu"}.</span>${d.status==="neu"?`<span class="newdot">Neu</span>`:""}${i?`<span class="stamp ${i.over||i.n<=3?"s-bad":"s-todo"}">${esc(d.deadlineKind||"Frist")} ${i.text}</span>`:""}${(d.tags||[]).slice(0,2).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</span>
         ${sn?`<span class="hit">${sn}</span>`:""}
       </span></button>`;
 }
