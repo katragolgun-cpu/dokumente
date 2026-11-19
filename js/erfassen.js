@@ -132,7 +132,7 @@ async function editorClick(e){
       if(!d.sender&&!d.subject){setStatus("Bitte mindestens Absender oder Betreff angeben.",true);return}
       if(!d.category)d.category=catNames()[catNames().length-1];
       if(d.deadline&&!d.deadlineKind)d.deadlineKind="Frist";
-      if(E.mode==="new"&&!E.dupOk){const dup=findDuplicate(d);if(dup)return showDup(dup)}
+      if(E.mode==="new"&&!E.dupOk){const dup=findDuplicate(d)||(E.inbox?.md5Checksum&&live().find(x=>x.md5===E.inbox.md5Checksum));if(dup)return showDup(dup)}
       b.disabled=true;
       if(E.mode==="new"){
         d.fileId=await storeFile(E.pdf,fileName(d));

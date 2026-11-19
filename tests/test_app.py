@@ -41,7 +41,7 @@ class FakeDrive:
         if "/drive/v3/changes/startPageToken" in u: return route.fulfill(json={"startPageToken": str(len(self.log))})
         if "/drive/v3/changes?" in u:
             t = int(re.search(r"pageToken=(\d+)", u).group(1)); ids = list(dict.fromkeys(self.log[t:]))
-            ch = [{"fileId": i, "file": {k: v for k, v in self.files[i].items() if k in ("id", "name", "parents", "trashed", "mimeType", "appProperties", "description", "webViewLink")}} if i in self.files else {"fileId": i, "removed": True} for i in ids]
+            ch = [{"fileId": i, "file": {k: v for k, v in self.files[i].items() if k in ("id", "name", "parents", "trashed", "mimeType", "appProperties", "description", "webViewLink", "md5Checksum")}} if i in self.files else {"fileId": i, "removed": True} for i in ids]
             return route.fulfill(json={"changes": ch, "newStartPageToken": str(len(self.log))})
         if "upload/drive" in u:
             fid = re.search(r"/files/([^?]+)", u)
@@ -328,10 +328,28 @@ def test_index_nur_sicherung(p):
     check(not errs, "keine JavaScript-Fehler " + str(errs))
     b.close()
 
+def test_pruefsumme(p):
+    print("Doppelte über die Prüfsumme der Datei")
+    docs = [doc(1)]
+    files = FOLDERS + [{"id": "D1", "name": docs[0]["name"], "parents": ["C_AUTO24"], "md5Checksum": "ABC"},
+                       {"id": "K1", "name": "Scan Kopie.pdf", "parents": ["INB"], "mimeType": "application/pdf", "md5Checksum": "ABC"},
+                       {"id": "N1", "name": "Scan neu.pdf", "parents": ["INB"], "mimeType": "application/pdf", "md5Checksum": "XYZ"}]
+    dr = FakeDrive(files); b, pg, errs = run(p, dr, docs)
+    pg.wait_for_timeout(1500); pg.evaluate("syncNow()"); pg.wait_for_timeout(1500)
+    check(pg.evaluate("S.docs[0].md5") == "ABC", "Prüfsumme je Brief gemerkt")
+    check(pg.evaluate("S.inbox.find(f=>f.id==='K1')?.same") == "d1", "identische Datei im Eingang erkannt")
+    check(pg.evaluate("S.inbox.find(f=>f.id==='N1')?.same") is None, "andere Datei nicht als doppelt markiert")
+    pg.click("#btnAdd"); pg.wait_for_timeout(800)
+    check(pg.locator("[data-act=dropsame]").count() == 1, "Knopf „In den Papierkorb“ bei identischer Datei")
+    pg.click("[data-act=dropsame]"); pg.wait_for_timeout(2500)
+    check(dr.files["K1"].get("trashed") is True, "identische Datei im Papierkorb")
+    check(not errs, "keine JavaScript-Fehler " + str(errs))
+    b.close()
+
 if __name__ == "__main__":
     srv = serve()
     with sync_playwright() as p:
-        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen, test_vorschau_und_karten, test_abgleich_ueber_aenderungen, test_index_nur_sicherung]:
+        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen, test_vorschau_und_karten, test_abgleich_ueber_aenderungen, test_index_nur_sicherung, test_pruefsumme]:
             try: t(p)
             except Exception as e: check(False, t.__name__ + ": " + repr(e)[:200])
     srv.shutdown()

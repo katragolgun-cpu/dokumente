@@ -10,7 +10,7 @@ const GMAIL="https://gmail.googleapis.com/gmail/v1/users/me";
 const API="https://www.googleapis.com/drive/v3/files",UPLOAD="https://www.googleapis.com/upload/drive/v3/files",CAL="https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente",INBOX_NAME="0 Eingang",NOCAT=new Set([INBOX_NAME,"Eingang","_App-Daten"]);
 const G={token:null,exp:0,busy:false,dirty:false,last:null,err:null,timer:null,calErr:false};
-const LOCAL_KEYS=["lastIndexUp","lastTextHash","changesToken","lastFull","metaBackup","driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
+const LOCAL_KEYS=["md5Filled","lastIndexUp","lastTextHash","changesToken","lastFull","metaBackup","driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
 try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()){G.token=t.token;G.exp=t.exp}}catch{}
 const tokenValid=()=>!!G.token&&Date.now()<G.exp-60000;
 const REDIRECT_URI=new URL("./",location.href).href;
@@ -149,10 +149,10 @@ const placeKey=d=>[folderName(d.category),docDate(d).slice(0,4),fileName(d)].joi
 const CHANGES="https://www.googleapis.com/drive/v3/changes";
 async function readChanges(){
   const s=S.settings;
-  if(!s.changesToken||!s.lastFull||Date.now()-Date.parse(s.lastFull)>864e5)return null;
+  if(!s.changesToken||!s.lastFull||!s.md5Filled||Date.now()-Date.parse(s.lastFull)>864e5)return null;
   const files=[];let pt=s.changesToken,next=null;
   while(pt){
-    const r=await (await gfetch(`${CHANGES}?pageToken=${q(pt)}&pageSize=1000&includeRemoved=true&spaces=drive&fields=${q("nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,parents,trashed,mimeType,appProperties,description,webViewLink))")}`)).json();
+    const r=await (await gfetch(`${CHANGES}?pageToken=${q(pt)}&pageSize=1000&includeRemoved=true&spaces=drive&fields=${q("nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,parents,trashed,mimeType,appProperties,description,webViewLink,md5Checksum))")}`)).json();
     for(const c of r.changes||[])files.push(c.file&&!c.removed?c.file:{id:c.fileId,trashed:true});
     pt=r.nextPageToken||null;if(r.newStartPageToken)next=r.newStartPageToken;
   }
@@ -169,7 +169,7 @@ async function adoptDriveState(map,changed){
   await refreshCats();
   // Alle Dateien der App mit Ort und Papierkorb-Status (App-Feld v=1, seit Schritt 2 an jeder Datei)
   let pt="";
-  do{const r=await (await gfetch(`${API}?q=${q("appProperties has { key='v' and value='1' }")}&fields=nextPageToken,files(id,name,parents,trashed,appProperties,description,webViewLink)&pageSize=1000${pt?"&pageToken="+q(pt):""}`)).json();
+  do{const r=await (await gfetch(`${API}?q=${q("appProperties has { key='v' and value='1' }")}&fields=nextPageToken,files(id,name,parents,trashed,appProperties,description,webViewLink,md5Checksum)&pageSize=1000${pt?"&pageToken="+q(pt):""}`)).json();
     files.push(...(r.files||[]));pt=r.nextPageToken||""}while(pt);
   }
   if(!files.length)return;
@@ -188,13 +188,14 @@ async function adoptDriveState(map,changed){
     if(f.trashed||!dk||known.has(f.id)||map.has(dk)||S.deleted[dk])continue;
     const par=(f.parents||[])[0];
     const d=metaFromDrive({...blankDoc(),id:dk,createdAt:(f.appProperties.cr||today())+"T00:00:00.000Z",driveId:f.id,name:f.name,folder:par,
-      url:f.webViewLink||`https://drive.google.com/file/d/${f.id}/view`,category:catOf.get(par)||""},f);
+      url:f.webViewLink||`https://drive.google.com/file/d/${f.id}/view`,category:catOf.get(par)||"",md5:f.md5Checksum||""},f);
     d.placeKey=placeKey(d);d.metaHash=hashStr(JSON.stringify(driveMeta(d)));d.updatedAt=now;
     map.set(d.id,d);await dbPut("docs",d);added++;glog("Aus Drive wiederhergestellt: "+f.name)}
   for(const d of [...map.values()]){
     const f=d.driveId&&byId.get(d.driveId);if(!f)continue;
     if(f.trashed){ // in Drive gelöscht: aus der App nehmen (Datei bleibt im Drive-Papierkorb)
       S.deleted[d.id]=now;map.delete(d.id);await dbDel("docs",d.id);gone++;glog("In Drive gelöscht, aus der App entfernt: "+(d.name||d.id));continue}
+    if(f.md5Checksum&&d.md5!==f.md5Checksum){d.md5=f.md5Checksum;await dbPut("docs",d)}
     const par=(f.parents||[])[0];if(!par||par===s.driveInboxId)continue;
     const local=d.placeKey!==undefined&&d.placeKey!==placeKey(d); // in der App geändert, noch nicht verschoben: App gewinnt
     if(par!==d.folder&&!local){
@@ -283,11 +284,16 @@ function chooseCategory(title,onPick,note,onCancel){
 async function listInbox(){
   const s=S.settings;if(!s.driveLinked||!tokenValid()||!hasDriveFull())return;
   await ensureFolders();if(!s.driveInboxId)return;
-  const r=await (await gfetch(`${API}?q=${q(`'${s.driveInboxId}' in parents and mimeType='application/pdf' and trashed=false`)}&fields=files(id,name,createdTime,size,webViewLink)&orderBy=createdTime desc&pageSize=100`)).json();
+  const r=await (await gfetch(`${API}?q=${q(`'${s.driveInboxId}' in parents and mimeType='application/pdf' and trashed=false`)}&fields=files(id,name,createdTime,size,webViewLink,md5Checksum)&orderBy=createdTime desc&pageSize=100`)).json();
   if(r.files==null){s.driveInboxId=null;return}
   // Dateien, die schon zu einem Brief gehören (z. B. in Drive in den Eingang verschoben), mit Hinweis anzeigen
   const byDrive=new Map(live().filter(d=>d.driveId).map(d=>[d.driveId,d]));
-  S.inbox=r.files.map(f=>({...f,known:byDrive.get(f.id)?.id||null}));updateInboxN();
+  S.inbox=r.files.map(f=>({...f,known:byDrive.get(f.id)?.id||null}));markInboxSame();updateInboxN();
+}
+// Identische Dateien (gleiche Prüfsumme wie ein gespeicherter Brief) im Eingang markieren
+function markInboxSame(){
+  const byMd5=new Map(live().filter(d=>d.md5).map(d=>[d.md5,d]));
+  for(const f of S.inbox)f.same=!f.known&&f.md5Checksum?byMd5.get(f.md5Checksum)?.id||null:null;
 }
 function updateInboxN(){const n=S.inbox.length,e=$("#inboxN");if(!e)return;e.hidden=!n;e.textContent=n;$("#btnAdd").setAttribute("aria-label",n?`Eingang, ${n} neue Scans`:"Eingang")}
 const INBOX_HELP="Brief mit dem Google-Drive-Scanner scannen und im Ordner „Dokumente/0 Eingang“ speichern.";
@@ -303,6 +309,8 @@ async function openInbox(){
       <div class="sec">${S.inbox.length?`<div class="optlist">${S.inbox.map(f=>{const k=f.known&&S.docs.find(d=>d.id===f.known);
         return k?`<div class="btn" style="text-align:left;padding:12px 14px">${esc(f.name)}<small>Schon in der App: ${esc(k.category||"ohne Kategorie")}</small>
           <div class="btnrow" style="margin-top:8px"><button type="button" class="btn primary" data-act="back" data-id="${esc(f.id)}">Zurück in die Ablage</button></div></div>`
+        :f.same&&S.docs.find(d=>d.id===f.same)?(x=>`<div class="btn" style="text-align:left;padding:12px 14px">${esc(f.name)}<small>Identische Datei schon vorhanden: ${esc([x.category,x.sender,dfmt(x.letterDate)].filter(Boolean).join(" · "))}</small>
+          <div class="btnrow" style="margin-top:8px"><button type="button" class="btn danger" data-act="dropsame" data-id="${esc(f.id)}">In den Papierkorb</button><button type="button" class="btn" data-act="take" data-id="${esc(f.id)}">Trotzdem verarbeiten</button></div></div>`)(S.docs.find(d=>d.id===f.same))
         :`<button type="button" class="btn" data-act="take" data-id="${esc(f.id)}">${esc(f.name)}<small>gescannt am ${dfmt((f.createdTime||"").slice(0,10))}${+f.size?` · ${Math.max(1,Math.round(f.size/1024))} KB`:""}</small></button>`}).join("")}</div>`
         :`<p class="status" style="margin:0">Keine neuen Scans. ${INBOX_HELP}</p>`}</div>`,
       `<button type="button" class="btn" data-act="close">Schließen</button><button type="button" class="btn" data-act="reload">Aktualisieren</button>`);
@@ -310,6 +318,9 @@ async function openInbox(){
       if(b.dataset.act==="close")return closeSheet();
       if(b.dataset.act==="reload")return load();
       if(b.dataset.act==="take"){const f=S.inbox.find(x=>x.id===b.dataset.id);if(f)takeInbox(f)}
+      if(b.dataset.act==="dropsame"){const f=S.inbox.find(x=>x.id===b.dataset.id);if(!f)return;
+        S.trash.push({kind:"file",id:f.id});await dbPut("meta",{key:"trash",items:S.trash});
+        S.inbox=S.inbox.filter(x=>x.id!==f.id);updateInboxN();scheduleSync();toast("Doppelte Datei in den Papierkorb gelegt");draw("")}
       if(b.dataset.act==="back"){const f=S.inbox.find(x=>x.id===b.dataset.id),d=f&&S.docs.find(x=>x.id===f.known);if(!d)return;
         // Ordner als „Eingang“ merken: der nächste Abgleich verschiebt die Datei zurück nach Kategorie/Jahr
         d.folder=S.settings.driveInboxId;d.placeKey=null;d.updatedAt=new Date().toISOString();await dbPut("docs",d);
@@ -402,7 +413,7 @@ async function syncNow(){
         const f=await dbGet("files",d.fileId);if(!f)continue;
         const target=await wantedFolder(d),name=fileName(d);
         const up=await uploadMultipart({name,parents:[target],description:[d.sender,d.subject,(d.tags||[]).join(", ")].filter(Boolean).join(" · ")},f.blob);
-        d.driveId=up.id;d.url=up.webViewLink||`https://drive.google.com/file/d/${up.id}/view`;d.folder=target;d.name=name;d.placeKey=pk;d.updatedAt=new Date().toISOString();
+        d.driveId=up.id;d.url=up.webViewLink||`https://drive.google.com/file/d/${up.id}/view`;d.folder=target;d.name=name;d.placeKey=pk;d.md5=up.md5Checksum||"";d.updatedAt=new Date().toISOString();
         await dbPut("docs",d);glog("Hochgeladen: "+name);
       }else if(d.driveId){
         let place=d.placeKey!==pk;
@@ -449,13 +460,13 @@ async function syncNow(){
     }
     await dailySnapshot(data);
     if(ch)S.settings.changesToken=ch.next||S.settings.changesToken;
-    else if(startTok){S.settings.changesToken=startTok;S.settings.lastFull=new Date().toISOString()}
+    else if(startTok){S.settings.changesToken=startTok;S.settings.lastFull=new Date().toISOString();S.settings.md5Filled=true}
     await dbPut("meta",{key:"settings",...S.settings});
     const s=S.settings,inbIds=new Set(S.inbox.map(f=>f.id));
     const folderCh=!ch||ch.files.some(f=>f.mimeType==="application/vnd.google-apps.folder");
     const inboxCh=!ch||!G.inboxLoaded||ch.files.some(f=>inbIds.has(f.id)||(f.parents||[]).includes(s.driveInboxId));
     try{if(folderCh)await refreshCats();if(inboxCh){await listInbox();G.inboxLoaded=true}}catch(e){if(e.code==="auth")throw e;glog("Eingang/Kategorien nicht lesbar: "+(e?.message||e))}
-    setTimeout(fillThumbs,500);
+    markInboxSame();setTimeout(fillThumbs,500);
     if(!ch||!G.resortChecked||ch.files.some(f=>/^dokumente-umsortieren/.test(f.name||""))){G.resortChecked=true;checkResort()}
     G.last=new Date();glog("Abgleich erfolgreich ("+S.docs.length+" Dokumente)");
   }catch(e){G.err=e.code==="auth"?"auth":"fail";G.dirty=true;glog("Abgleich fehlgeschlagen: "+(e?.message||e))}
