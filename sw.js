@@ -1,8 +1,8 @@
 // Offline-Unterstützung: App-Dateien und Texterkennung werden zwischengespeichert.
-const VERSION = "v19";
+const VERSION = "v20";
 const SHELL = "shell-" + VERSION;
 const RUNTIME = "runtime-" + VERSION;
-const FILES = ["./", "index.html", "parser.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];
+const FILES = ["./", "index.html", "parser.js", "js/basis.js", "js/bausteine.js", "js/erfassen.js", "js/einstellungen.js", "js/scanner.js", "js/drive.js", "js/import.js", "js/start.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES.map(f => new Request(f, { cache: "reload" })))).then(() => self.skipWaiting()));

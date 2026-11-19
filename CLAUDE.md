@@ -13,7 +13,9 @@ Installierbare Web-App (PWA) für Android. Eingehende Briefe fotografieren, auf 
 - Löschen nur in den Drive-Papierkorb, nie endgültig.
 
 ## Dateien
-- `index.html` – die ganze App: CSS, HTML und JavaScript in einer Datei. Eingangsordner heißt `0 Eingang` (steht in Drive oben). Abschnitte sind mit `/* ================= Name ================= */` markiert (Speicher, Zustand, Suche, Liste, Gruppierung, Erfassen, Großansicht, Mehrfachauswahl, Einstellungen, Texterkennung/Scanner, Google Drive und Kalender, Import, Start).
+- `index.html` – Gerüst: CSS und HTML, lädt die Skripte unten in fester Reihenfolge. Eingangsordner heißt `0 Eingang` (steht in Drive oben).
+- `js/*.js` – die App als klassische Skripte (keine Module, gemeinsame globale Namen), Reihenfolge: `basis.js` (Speicher, Zustand, Suche, Liste, Gruppierung, Filter), `bausteine.js` (Sheets, Großansicht), `erfassen.js` (Formular, Ansicht, Löschen, Mehrfachauswahl, Teilen), `einstellungen.js`, `scanner.js` (Texterkennung, PDF), `drive.js` (Google Drive, Kategorien, Eingang, Kalender, Abgleich), `import.js` (Teilen-Menü, Import, Umsortieren), `start.js`. Beim Laden nur Funktionen aus früheren Dateien direkt aufrufen.
+- `tests/test_app.py` – Browser-Tests mit nachgebildeter Drive-API (nur ausgedachte Daten).
 - `parser.js` – `Letter.parseLetter(text, ctx)`: Absender, Betreff, Datum, Aktenzeichen, Betrag, Frist, Kategorie, Schlagwörter, Kurzinfo. Nur Regeln. Stellt auch `Letter.fold` bereit.
 - `sw.js` – Service Worker für Offline-Betrieb.
 - `manifest.webmanifest`, Icons.
@@ -29,9 +31,11 @@ Installierbare Web-App (PWA) für Android. Eingehende Briefe fotografieren, auf 
 - Benutzer-Texte auf Deutsch, kurz und klar.
 - Vor dem Commit Syntax prüfen:
   ```
-  node -e "const s=require('fs').readFileSync('index.html','utf8');[...s.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g)].forEach(x=>new Function(x[1]));console.log('syntax ok')"
+  for f in parser.js js/*.js sw.js; do node --check $f || echo FEHLER $f; done
   ```
-- Neue Funktionen im Browser testen: `python3 -m http.server`, dann mit Playwright (Chromium, Viewport 390×844, `has_touch`) Testdaten in `S.docs` setzen, `S.loaded=true`, `render()` aufrufen und Screenshot prüfen. Google-Zugriffe mit nachgestellten Antworten testen.
+- Neue Skriptdatei: in `index.html` einbinden und in `FILES` in `sw.js` eintragen.
+- Vor jedem Hochladen `python3 tests/test_app.py` laufen lassen; neue Funktionen bekommen dort einen Test.
+- Zusätzlich Oberfläche prüfen: `python3 -m http.server`, dann mit Playwright (Chromium, Viewport 390×844, `has_touch`) Testdaten in `S.docs` setzen, `S.loaded=true`, `render()` aufrufen und Screenshot prüfen. Google-Zugriffe mit nachgestellten Antworten testen.
 - Nach dem Hochladen sagen, was nur mit Testdaten geprüft ist und was Olgun auf dem Handy testen soll.
 
 ## Arbeitsweise mit Olgun
