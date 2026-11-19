@@ -1357,7 +1357,7 @@ const GMAIL="https://gmail.googleapis.com/gmail/v1/users/me";
 const API="https://www.googleapis.com/drive/v3/files",UPLOAD="https://www.googleapis.com/upload/drive/v3/files",CAL="https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente",INBOX_NAME="0 Eingang",NOCAT=new Set([INBOX_NAME,"Eingang","_App-Daten"]);
 const G={token:null,exp:0,busy:false,dirty:false,last:null,err:null,timer:null,calErr:false};
-const LOCAL_KEYS=["driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
+const LOCAL_KEYS=["driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
 try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()){G.token=t.token;G.exp=t.exp}}catch{}
 const tokenValid=()=>!!G.token&&Date.now()<G.exp-60000;
 const REDIRECT_URI=new URL("./",location.href).href;
@@ -1443,9 +1443,11 @@ const wantedFolder=d=>ensurePath([folderName(d.category),docDate(d).slice(0,4)])
 async function uploadMultipart(meta,blob,fileId){
   const b="b"+uid();
   const body=new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: ${blob.type||"application/octet-stream"}\r\n\r\n`,blob,`\r\n--${b}--`]);
-  const url=fileId?`${UPLOAD}/${fileId}?uploadType=multipart&fields=id,webViewLink`:`${UPLOAD}?uploadType=multipart&fields=id,webViewLink`;
+  const url=fileId?`${UPLOAD}/${fileId}?uploadType=multipart&fields=id,webViewLink,md5Checksum`:`${UPLOAD}?uploadType=multipart&fields=id,webViewLink,md5Checksum`;
   return (await gfetch(url,{method:fileId?"PATCH":"POST",headers:{"Content-Type":`multipart/related; boundary=${b}`},body})).json();
 }
+// Schneller Prüfwert (FNV-1a), um unveränderte Index-Daten nicht erneut hochzuladen
+function hashStr(t){let h=2166136261;for(let i=0;i<t.length;i++){h^=t.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0).toString(36)+"."+t.length}
 function stripLocal(d){const c=structuredClone(d);delete c.fileId;delete c.thumbId;return c}
 function scheduleSync(){if(!S.settings.driveLinked)return;G.dirty=true;updateChip();clearTimeout(G.timer);G.timer=setTimeout(syncNow,1500)}
 
@@ -1586,8 +1588,11 @@ async function syncNow(){
     await ensureFolders();
     let remote=null;
     if(S.settings.driveDataId){
-      try{remote=await (await gfetch(`${API}/${S.settings.driveDataId}?alt=media`)).json()}
-      catch(e){if(e.code==="auth")throw e;S.settings.driveDataId=null;await ensureFolders()}
+      try{const meta=await (await gfetch(`${API}/${S.settings.driveDataId}?fields=md5Checksum,trashed`)).json();
+        if(meta.trashed){const e=new Error("gone");e.code="gone";throw e}
+        // Unverändert seit unserem letzten Hochladen: Inhalt ist schon eingearbeitet
+        if(!meta.md5Checksum||meta.md5Checksum!==S.settings.driveDataMd5){remote=await (await gfetch(`${API}/${S.settings.driveDataId}?alt=media`)).json();S.settings.driveDataMd5=null}}
+      catch(e){if(e.code!=="gone")throw e;S.settings.driveDataId=null;S.settings.driveDataMd5=null;await ensureFolders()}
     }
     for(const [id,t] of Object.entries(remote?.deleted||{}))if(!S.deleted[id]||S.deleted[id]<t)S.deleted[id]=t;
     // Dokumente zusammenführen: neuere Änderung gewinnt, lokale Dateien bleiben
@@ -1604,14 +1609,14 @@ async function syncNow(){
         const f=await dbGet("files",d.fileId);if(!f)continue;
         const up=await uploadMultipart({name,parents:[target],description:[d.sender,d.subject,(d.tags||[]).join(", ")].filter(Boolean).join(" · ")},f.blob);
         d.driveId=up.id;d.url=up.webViewLink||`https://drive.google.com/file/d/${up.id}/view`;d.folder=target;d.name=name;d.updatedAt=new Date().toISOString();
-        glog("Hochgeladen: "+name);
+        await dbPut("docs",d);glog("Hochgeladen: "+name);
       }else if(d.driveId&&(d.folder!==target||d.name!==name)){
-        try{await moveFile(d.driveId,target,name);d.folder=target;d.name=name;d.updatedAt=new Date().toISOString()}
+        try{await moveFile(d.driveId,target,name);d.folder=target;d.name=name;d.updatedAt=new Date().toISOString();await dbPut("docs",d)}
         catch(e){if(e.code==="auth")throw e;glog("Verschieben nicht möglich: "+(d.name||d.driveId))}
       }
       if(d.driveId)for(const [i,a] of (d.attachments||[]).entries()){
         const an=name.replace(/\.pdf$/,`_Anlage-${i+1}.pdf`);if(!a.driveId||(a.folder===target&&a.dname===an))continue;
-        try{await moveFile(a.driveId,target,an);a.folder=target;a.dname=an;d.updatedAt=new Date().toISOString()}
+        try{await moveFile(a.driveId,target,an);a.folder=target;a.dname=an;d.updatedAt=new Date().toISOString();await dbPut("docs",d)}
         catch(e){if(e.code==="auth")throw e;if(e.code==="gone"){a.folder=target;a.dname=an}glog("Anlage nicht verschiebbar ("+(e.code||e.message)+"): "+(a.name||a.driveId))}
       }
     }
@@ -1632,10 +1637,13 @@ async function syncNow(){
     for(const d of map.values())await dbPut("docs",d);
     S.docs=[...map.values()];
     await dbPut("meta",{key:"deleted",items:S.deleted});
-    const data=exportData();
-    const blob=new Blob([JSON.stringify(data)],{type:"application/json"});
-    const up=await uploadMultipart(S.settings.driveDataId?{}:{name:DATA_NAME,parents:[S.settings.driveAppId]},blob,S.settings.driveDataId);
-    if(!S.settings.driveDataId)S.settings.driveDataId=up.id;
+    const data=exportData(),h=hashStr(JSON.stringify({...data,updatedAt:null}));
+    if(!S.settings.driveDataId||h!==S.settings.lastUpHash||!S.settings.driveDataMd5){
+      const blob=new Blob([JSON.stringify(data)],{type:"application/json"});
+      const up=await uploadMultipart(S.settings.driveDataId?{}:{name:DATA_NAME,parents:[S.settings.driveAppId]},blob,S.settings.driveDataId);
+      if(!S.settings.driveDataId)S.settings.driveDataId=up.id;
+      S.settings.driveDataMd5=up.md5Checksum||null;S.settings.lastUpHash=h;glog("Index gespeichert");
+    }
     await dailySnapshot(data);
     await dbPut("meta",{key:"settings",...S.settings});
     try{await refreshCats();await listInbox()}catch(e){if(e.code==="auth")throw e;glog("Eingang/Kategorien nicht lesbar: "+(e?.message||e))}
