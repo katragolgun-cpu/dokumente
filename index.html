@@ -1507,8 +1507,9 @@ async function listInbox(){
   await ensureFolders();if(!s.driveInboxId)return;
   const r=await (await gfetch(`${API}?q=${q(`'${s.driveInboxId}' in parents and mimeType='application/pdf' and trashed=false`)}&fields=files(id,name,createdTime,size,webViewLink)&orderBy=createdTime desc&pageSize=100`)).json();
   if(r.files==null){s.driveInboxId=null;return}
-  const taken=new Set(S.docs.map(d=>d.driveId).filter(Boolean));
-  S.inbox=r.files.filter(f=>!taken.has(f.id));updateInboxN();
+  // Dateien, die schon zu einem Brief gehören (z. B. in Drive in den Eingang verschoben), mit Hinweis anzeigen
+  const byDrive=new Map(live().filter(d=>d.driveId).map(d=>[d.driveId,d]));
+  S.inbox=r.files.map(f=>({...f,known:byDrive.get(f.id)?.id||null}));updateInboxN();
 }
 function updateInboxN(){const n=S.inbox.length,e=$("#inboxN");if(!e)return;e.hidden=!n;e.textContent=n;$("#btnAdd").setAttribute("aria-label",n?`Eingang, ${n} neue Scans`:"Eingang")}
 const INBOX_HELP="Brief mit dem Google-Drive-Scanner scannen und im Ordner „Dokumente/0 Eingang“ speichern.";
@@ -1521,13 +1522,20 @@ async function openInbox(){
   if(!tokenValid())return msg("Die Anmeldung bei Google ist abgelaufen.","Neu anmelden","relog");
   const draw=(status,err)=>{
     sheet("Eingang",`<div id="edStatus" class="status${err?" err":""}" style="margin-top:10px">${esc(status||"")}</div>
-      <div class="sec">${S.inbox.length?`<div class="optlist">${S.inbox.map(f=>`<button type="button" class="btn" data-act="take" data-id="${esc(f.id)}">${esc(f.name)}<small>gescannt am ${dfmt((f.createdTime||"").slice(0,10))}${+f.size?` · ${Math.max(1,Math.round(f.size/1024))} KB`:""}</small></button>`).join("")}</div>`
+      <div class="sec">${S.inbox.length?`<div class="optlist">${S.inbox.map(f=>{const k=f.known&&S.docs.find(d=>d.id===f.known);
+        return k?`<div class="btn" style="text-align:left;padding:12px 14px">${esc(f.name)}<small>Schon in der App: ${esc(k.category||"ohne Kategorie")}</small>
+          <div class="btnrow" style="margin-top:8px"><button type="button" class="btn primary" data-act="back" data-id="${esc(f.id)}">Zurück in die Ablage</button></div></div>`
+        :`<button type="button" class="btn" data-act="take" data-id="${esc(f.id)}">${esc(f.name)}<small>gescannt am ${dfmt((f.createdTime||"").slice(0,10))}${+f.size?` · ${Math.max(1,Math.round(f.size/1024))} KB`:""}</small></button>`}).join("")}</div>`
         :`<p class="status" style="margin:0">Keine neuen Scans. ${INBOX_HELP}</p>`}</div>`,
       `<button type="button" class="btn" data-act="close">Schließen</button><button type="button" class="btn" data-act="reload">Aktualisieren</button>`);
     $("#scrim").addEventListener("click",async e=>{const b=e.target.closest("[data-act]");if(!b)return;
       if(b.dataset.act==="close")return closeSheet();
       if(b.dataset.act==="reload")return load();
-      if(b.dataset.act==="take"){const f=S.inbox.find(x=>x.id===b.dataset.id);if(f)takeInbox(f)}});
+      if(b.dataset.act==="take"){const f=S.inbox.find(x=>x.id===b.dataset.id);if(f)takeInbox(f)}
+      if(b.dataset.act==="back"){const f=S.inbox.find(x=>x.id===b.dataset.id),d=f&&S.docs.find(x=>x.id===f.known);if(!d)return;
+        // Ordner als „Eingang“ merken: der nächste Abgleich verschiebt die Datei zurück nach Kategorie/Jahr
+        d.folder=S.settings.driveInboxId;d.updatedAt=new Date().toISOString();await dbPut("docs",d);
+        S.inbox=S.inbox.filter(x=>x.id!==f.id);updateInboxN();scheduleSync();toast("Wird zurück nach „"+(d.category||"")+"“ verschoben");draw("")}});
   };
   const load=async()=>{draw("Eingang wird gelesen …");
     try{await listInbox();if(S.edit?.mode==="inbox")draw(S.inbox.length?`${S.inbox.length} neue${S.inbox.length===1?"r":""} Scan${S.inbox.length===1?"":"s"}. Antippen zum Verarbeiten.`:"")}
