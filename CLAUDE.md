@@ -13,7 +13,7 @@ Installierbare Web-App (PWA) für Android. Eingehende Briefe fotografieren, auf 
 - Löschen nur in den Drive-Papierkorb, nie endgültig.
 
 ## Dateien
-- `index.html` – die ganze App: CSS, HTML und JavaScript in einer Datei. Abschnitte sind mit `/* ================= Name ================= */` markiert (Speicher, Zustand, Suche, Liste, Gruppierung, Erfassen, Großansicht, Mehrfachauswahl, Einstellungen, Texterkennung/Scanner, Google Drive und Kalender, Import, Start).
+- `index.html` – die ganze App: CSS, HTML und JavaScript in einer Datei. Eingangsordner heißt `0 Eingang` (steht in Drive oben). Abschnitte sind mit `/* ================= Name ================= */` markiert (Speicher, Zustand, Suche, Liste, Gruppierung, Erfassen, Großansicht, Mehrfachauswahl, Einstellungen, Texterkennung/Scanner, Google Drive und Kalender, Import, Start).
 - `parser.js` – `Letter.parseLetter(text, ctx)`: Absender, Betreff, Datum, Aktenzeichen, Betrag, Frist, Kategorie, Schlagwörter, Kurzinfo. Nur Regeln. Stellt auch `Letter.fold` bereit.
 - `sw.js` – Service Worker für Offline-Betrieb.
 - `manifest.webmanifest`, Icons.

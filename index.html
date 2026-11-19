@@ -379,7 +379,7 @@ function render(){
   if(S.sel){const ids=new Set(all.map(d=>d.id));for(const id of [...S.sel])if(!ids.has(id))S.sel.delete(id)}
   updateSelBar();
   const list=$("#list");
-  if(!all.length){list.innerHTML=`<div class="empty">Noch keine Dokumente.<br>Brief mit dem Drive-Scanner scannen und in „Dokumente/Eingang“ speichern. Dann hier auf „Eingang“ tippen.</div>`;return}
+  if(!all.length){list.innerHTML=`<div class="empty">Noch keine Dokumente.<br>Brief mit dem Drive-Scanner scannen und in „Dokumente/0 Eingang“ speichern. Dann hier auf „Eingang“ tippen.</div>`;return}
   if(!rows.length){list.innerHTML=`<div class="empty">${S.q?"Nichts gefunden.":"Keine Dokumente in dieser Ansicht."}</div>`;return}
   let html="";
   if(S.group==="keine"){
@@ -721,6 +721,23 @@ async function runOcr(input){
   setStatus(got.length?`Erkannt: ${got.join(", ")}. Bitte kurz prüfen.`:"Nichts sicher erkannt. Bitte Felder ausfüllen.");
   const dup=findDuplicate(E.doc);if(dup)setStatus(`Achtung: Ein ähnlicher Brief ist schon gespeichert (${dup.sender||""}, ${dfmt(dup.letterDate)}).`,true);
 }
+// Ähnlicher Brief schon vorhanden: verwerfen, trotzdem speichern oder zurück zum Formular
+function showDup(dup){
+  const E=S.edit;
+  sheet("Doppelter Brief?",`<div class="sec"><p style="margin:0"><b>Ähnlicher Brief schon vorhanden:</b></p>
+    <p class="status" style="margin:6px 0 0">${esc([dup.sender,dfmt(dup.letterDate),dup.subject].filter(Boolean).join(" · "))}${dup.category?`<br>Kategorie: ${esc(dup.category)}`:""}</p></div>
+    <div class="sec"><div class="optlist">
+      <button type="button" class="btn danger" data-act="dupdrop">Scan verwerfen${E.inbox?" (Papierkorb)":""}</button>
+      <button type="button" class="btn" data-act="dupsave">Trotzdem speichern</button>
+      <button type="button" class="btn" data-act="dupback">Zurück</button></div></div>`,"");
+  $("#scrim").addEventListener("click",async e=>{const b=e.target.closest("[data-act]");if(!b||S.edit!==E)return;
+    if(b.dataset.act==="dupback")return drawEditor();
+    if(b.dataset.act==="dupsave"){E.dupOk=true;drawEditor();return $("#scrim [data-act=save]")?.click()}
+    if(b.dataset.act==="dupdrop"){
+      if(E.inbox){S.trash.push({kind:"file",id:E.inbox.id});await dbPut("meta",{key:"trash",items:S.trash});
+        S.inbox=S.inbox.filter(x=>x.id!==E.inbox.id);updateInboxN();scheduleSync()}
+      closeSheet();toast(E.inbox?"Scan in den Papierkorb gelegt":"Brief verworfen")}});
+}
 function findDuplicate(d){return live().find(x=>x.id!==d.id&&x.letterDate&&x.letterDate===d.letterDate&&fold(x.sender)===fold(d.sender)&&(fold(x.subject)===fold(d.subject)||(x.ref&&x.ref===d.ref)))}
 async function editorClick(e){
   const b=e.target.closest("[data-act]");if(!b)return;const E=S.edit;
@@ -738,6 +755,7 @@ async function editorClick(e){
       if(!d.sender&&!d.subject){setStatus("Bitte mindestens Absender oder Betreff angeben.",true);return}
       if(!d.category)d.category=catNames()[catNames().length-1];
       if(d.deadline&&!d.deadlineKind)d.deadlineKind="Frist";
+      if(E.mode==="new"&&!E.dupOk){const dup=findDuplicate(d);if(dup)return showDup(dup)}
       b.disabled=true;
       if(E.mode==="new"){
         d.fileId=await storeFile(E.pdf,fileName(d));
@@ -933,7 +951,7 @@ function openSettings(){
     <div id="edStatus" class="status" style="margin-top:10px"></div>
     <div class="sec"><h3>Google Drive</h3>
       <p class="status" style="margin:0">${s.driveLinked
-        ?"Neue Scans kommen in den Drive-Ordner „Dokumente/Eingang“. Verarbeitete Briefe liegen als PDF in „Dokumente“, sortiert nach Kategorie und Jahr. Jeden Tag kommt eine datierte Sicherung nach „_App-Daten/Sicherungen“."+(s.lastSnapshot?" Letzte: "+dfmt(s.lastSnapshot)+".":"")
+        ?"Neue Scans kommen in den Drive-Ordner „Dokumente/0 Eingang“. Verarbeitete Briefe liegen als PDF in „Dokumente“, sortiert nach Kategorie und Jahr. Jeden Tag kommt eine datierte Sicherung nach „_App-Daten/Sicherungen“."+(s.lastSnapshot?" Letzte: "+dfmt(s.lastSnapshot)+".":"")
         :"Nach dem Verbinden liegen alle Briefe als PDF im Drive-Ordner „Dokumente“."}</p>
       <p class="status" id="driveStatus" style="margin:0;font-weight:600"></p>
       <div class="btnrow">${s.driveLinked
@@ -1331,13 +1349,13 @@ function jpegsToPdf(pages){
 
 /* ================= Google Drive und Kalender ================= */
 const GOOGLE_CLIENT_ID="592336920931-5s1klnrs64841o02016jk7mknm248rdf.apps.googleusercontent.com";
-// Voller Drive-Zugriff: nötig, um Scans aus „Dokumente/Eingang“ und selbst angelegte Kategorie-Ordner zu sehen
+// Voller Drive-Zugriff: nötig, um Scans aus „Dokumente/0 Eingang“ und selbst angelegte Kategorie-Ordner zu sehen
 const DRIVE_SCOPE="https://www.googleapis.com/auth/drive",CAL_SCOPE="https://www.googleapis.com/auth/calendar.events";
 // Nur für den einmaligen Import vorhandener Dateien: voller Drive-Lesezugriff und Gmail lesen
 const DRIVE_FULL="https://www.googleapis.com/auth/drive",GMAIL_RO="https://www.googleapis.com/auth/gmail.readonly";
 const GMAIL="https://gmail.googleapis.com/gmail/v1/users/me";
 const API="https://www.googleapis.com/drive/v3/files",UPLOAD="https://www.googleapis.com/upload/drive/v3/files",CAL="https://www.googleapis.com/calendar/v3/calendars/primary/events";
-const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente",INBOX_NAME="Eingang",NOCAT=new Set([INBOX_NAME,"_App-Daten"]);
+const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente",INBOX_NAME="0 Eingang",NOCAT=new Set([INBOX_NAME,"Eingang","_App-Daten"]);
 const G={token:null,exp:0,busy:false,dirty:false,last:null,err:null,timer:null,calErr:false};
 const LOCAL_KEYS=["driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
 try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()){G.token=t.token;G.exp=t.exp}}catch{}
@@ -1402,7 +1420,11 @@ async function ensureFolders(){
   const s=S.settings;let changed=false;
   if(!s.driveFolderId){s.driveFolderId=await findOrCreateFolder(FOLDER_NAME);changed=true}
   if(!s.driveAppId){s.driveAppId=await findOrCreateFolder("_App-Daten",s.driveFolderId);changed=true}
-  if(!s.driveInboxId&&hasDriveFull()){s.driveInboxId=await findOrCreateFolder(INBOX_NAME,s.driveFolderId);changed=true}
+  if(!s.driveInboxId&&hasDriveFull()){
+    const old=await (await gfetch(`${API}?q=${q(`name='Eingang' and '${s.driveFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`)}&fields=files(id)`)).json();
+    if(old.files?.[0]?.id){s.driveInboxId=old.files[0].id;await gfetch(`${API}/${s.driveInboxId}?fields=id`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:INBOX_NAME})})}
+    else s.driveInboxId=await findOrCreateFolder(INBOX_NAME,s.driveFolderId);
+    changed=true}
   if(!s.driveDataId){const id=await findFile(DATA_NAME,s.driveAppId);if(id){s.driveDataId=id;changed=true}}
   if(changed)await dbPut("meta",{key:"settings",...s});
 }
@@ -1477,7 +1499,7 @@ function chooseCategory(title,onPick,note,onCancel){
     if(b.dataset.act==="pick")return go(b.dataset.c);
     if(b.dataset.act==="new")return make()});
 }
-/* ---- Eingang: Scans aus „Dokumente/Eingang“ (Google-Drive-Scanner) ---- */
+/* ---- Eingang: Scans aus „Dokumente/0 Eingang“ (Google-Drive-Scanner) ---- */
 async function listInbox(){
   const s=S.settings;if(!s.driveLinked||!tokenValid()||!hasDriveFull())return;
   await ensureFolders();if(!s.driveInboxId)return;
@@ -1487,13 +1509,13 @@ async function listInbox(){
   S.inbox=r.files.filter(f=>!taken.has(f.id));updateInboxN();
 }
 function updateInboxN(){const n=S.inbox.length,e=$("#inboxN");if(!e)return;e.hidden=!n;e.textContent=n;$("#btnAdd").setAttribute("aria-label",n?`Eingang, ${n} neue Scans`:"Eingang")}
-const INBOX_HELP="Brief mit dem Google-Drive-Scanner scannen und im Ordner „Dokumente/Eingang“ speichern.";
+const INBOX_HELP="Brief mit dem Google-Drive-Scanner scannen und im Ordner „Dokumente/0 Eingang“ speichern.";
 async function openInbox(){
   const s=S.settings;S.edit={mode:"inbox",urls:[]};
   const msg=(t,btn,act)=>{sheet("Eingang",`<div class="sec"><p class="status" style="margin:0">${t}</p>${btn?`<div class="btnrow"><button type="button" class="btn primary" data-act="${act}">${btn}</button></div>`:""}</div>`,`<button type="button" class="btn" data-act="close">Schließen</button>`);
     $("#scrim").addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(!b)return;closeSheet();if(b.dataset.act==="link")connectDrive(false);if(b.dataset.act==="relog")connectDrive(true)})};
   if(!s.driveLinked)return msg("Für den Eingang zuerst mit Google Drive verbinden. "+INBOX_HELP,"Mit Google Drive verbinden","link");
-  if(!hasDriveFull())return msg("Die App braucht jetzt Zugriff auf dein Google Drive, um Scans aus „Dokumente/Eingang“ und deine Kategorie-Ordner zu lesen. Google fragt einmal nach.","Zugriff erlauben","link");
+  if(!hasDriveFull())return msg("Die App braucht jetzt Zugriff auf dein Google Drive, um Scans aus „Dokumente/0 Eingang“ und deine Kategorie-Ordner zu lesen. Google fragt einmal nach.","Zugriff erlauben","link");
   if(!tokenValid())return msg("Die Anmeldung bei Google ist abgelaufen.","Neu anmelden","relog");
   const draw=(status,err)=>{
     sheet("Eingang",`<div id="edStatus" class="status${err?" err":""}" style="margin-top:10px">${esc(status||"")}</div>
