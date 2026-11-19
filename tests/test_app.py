@@ -28,7 +28,7 @@ def serve():
 class FakeDrive:
     """Sehr einfache Nachbildung der Drive-API: Ordner und Dateien im Speicher."""
     def __init__(self, files=None, extra=None):
-        self.files = {f["id"]: f for f in (files or [])}
+        self.files = {f["id"]: json.loads(json.dumps(f, default=lambda o: o.decode("latin-1"))) if "content" not in f else dict(f) for f in (files or [])}
         self.calls = []; self.n = 0; self.extra = extra or (lambda route, m, u, uq: None); self.log = []
     def touch(self, fid): self.log.append(fid)  # Änderung für die Drive-Änderungsliste merken
     def new_id(self): self.n += 1; return "N%d" % self.n
@@ -41,7 +41,7 @@ class FakeDrive:
         if "/drive/v3/changes/startPageToken" in u: return route.fulfill(json={"startPageToken": str(len(self.log))})
         if "/drive/v3/changes?" in u:
             t = int(re.search(r"pageToken=(\d+)", u).group(1)); ids = list(dict.fromkeys(self.log[t:]))
-            ch = [{"fileId": i, "file": {k: v for k, v in self.files[i].items() if k in ("id", "name", "parents", "trashed", "mimeType")}} if i in self.files else {"fileId": i, "removed": True} for i in ids]
+            ch = [{"fileId": i, "file": {k: v for k, v in self.files[i].items() if k in ("id", "name", "parents", "trashed", "mimeType", "appProperties", "description", "webViewLink")}} if i in self.files else {"fileId": i, "removed": True} for i in ids]
             return route.fulfill(json={"changes": ch, "newStartPageToken": str(len(self.log))})
         if "upload/drive" in u:
             fid = re.search(r"/files/([^?]+)", u)
@@ -303,10 +303,35 @@ def test_abgleich_ueber_aenderungen(p):
     check(not errs, "keine JavaScript-Fehler " + str(errs))
     b.close()
 
+def test_index_nur_sicherung(p):
+    print("Index nur Sicherung, Wiederherstellen aus Drive")
+    props = {"v": "1", "dk": "x1", "sender": "Stadtwerke", "subject": "Abschlag", "date": "2024-05-02", "status": "todo", "tags": "Strom, Abschlag", "cr": "2024-05-03"}
+    files = FOLDERS + [{"id": "F1", "name": "2024-05-02_Stadtwerke_Abschlag.pdf", "parents": ["C_AUTO24"], "appProperties": props, "description": "Abschlag 80 Euro"}]
+    dr = FakeDrive(files); b, pg, errs = run(p, dr, [])
+    pg.wait_for_timeout(1500)
+    d = pg.evaluate("S.docs.find(d=>d.id==='x1')")
+    check(bool(d) and d["sender"] == "Stadtwerke" and d["category"] == "Auto" and d["tags"] == ["Strom", "Abschlag"] and d["summary"] == "Abschlag 80 Euro", "Brief allein aus Drive wiederhergestellt")
+    pg.evaluate("syncNow()"); pg.wait_for_timeout(1500)
+    # Statusänderung: Angaben an die Datei, aber keine neue Index-Sicherung
+    dr.calls.clear()
+    pg.evaluate("(async()=>{const d=S.docs[0];d.status='erledigt';d.updatedAt=new Date().toISOString();await dbPut('docs',d);await syncNow()})()"); pg.wait_for_timeout(2000)
+    check(dr.files["F1"]["appProperties"]["status"] == "erledigt", "Status an der Datei")
+    check(not any(c.startswith("PATCH") and "upload/drive" in c for c in dr.calls), "keine Index-Übertragung nur wegen Status")
+    # neuer erkannter Text: Index-Sicherung sofort
+    dr.calls.clear()
+    pg.evaluate("(async()=>{const d=S.docs[0];d.text='Neuer Text';d.updatedAt=new Date().toISOString();await dbPut('docs',d);await syncNow()})()"); pg.wait_for_timeout(2000)
+    check(any(c.startswith("PATCH") and "upload/drive" in c for c in dr.calls), "Index-Sicherung bei neuem Text")
+    # Angaben anderswo geändert
+    dr.files["F1"]["appProperties"] = dict(dr.files["F1"]["appProperties"], subject="Abschlag neu"); dr.touch("F1")
+    pg.evaluate("syncNow()"); pg.wait_for_timeout(2000)
+    check(pg.evaluate("S.docs[0].subject") == "Abschlag neu", "Änderung an der Datei übernommen")
+    check(not errs, "keine JavaScript-Fehler " + str(errs))
+    b.close()
+
 if __name__ == "__main__":
     srv = serve()
     with sync_playwright() as p:
-        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen, test_vorschau_und_karten, test_abgleich_ueber_aenderungen]:
+        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen, test_vorschau_und_karten, test_abgleich_ueber_aenderungen, test_index_nur_sicherung]:
             try: t(p)
             except Exception as e: check(False, t.__name__ + ": " + repr(e)[:200])
     srv.shutdown()

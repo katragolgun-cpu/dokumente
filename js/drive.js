@@ -10,7 +10,7 @@ const GMAIL="https://gmail.googleapis.com/gmail/v1/users/me";
 const API="https://www.googleapis.com/drive/v3/files",UPLOAD="https://www.googleapis.com/upload/drive/v3/files",CAL="https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente",INBOX_NAME="0 Eingang",NOCAT=new Set([INBOX_NAME,"Eingang","_App-Daten"]);
 const G={token:null,exp:0,busy:false,dirty:false,last:null,err:null,timer:null,calErr:false};
-const LOCAL_KEYS=["changesToken","lastFull","metaBackup","driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
+const LOCAL_KEYS=["lastIndexUp","lastTextHash","changesToken","lastFull","metaBackup","driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
 try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()){G.token=t.token;G.exp=t.exp}}catch{}
 const tokenValid=()=>!!G.token&&Date.now()<G.exp-60000;
 const REDIRECT_URI=new URL("./",location.href).href;
@@ -104,9 +104,21 @@ function hashStr(t){let h=2166136261;for(let i=0;i<t.length;i++){h^=t.charCodeAt
 /* ---- Angaben direkt an der Datei in Drive (Umbau Schritt 2): versteckte App-Felder + Kurzinfo als Beschreibung ---- */
 // Drive erlaubt je Feld höchstens 124 Bytes für Name und Wert zusammen
 function propFit(k,v){v=String(v??"");const enc=new TextEncoder();while(v&&enc.encode(k+v).length>124)v=v.slice(0,-1);return v}
+// Gegenrichtung: Angaben aus den App-Feldern einer Drive-Datei lesen
+function metaFromDrive(d,f){
+  const p=f.appProperties||{},fb=[p.sender,p.subject].filter(Boolean).join(" · ");
+  Object.assign(d,{sender:p.sender||"",subject:p.subject||"",letterDate:p.date||"",ref:p.ref||"",refLabel:p.refLabel||"",amount:p.amount?+p.amount:null,
+    deadline:p.deadline||"",deadlineKind:p.dlKind||"",status:p.status||"neu",tags:p.tags?p.tags.split(", ").filter(Boolean):[],note:p.note||"",
+    summary:f.description&&f.description!==fb?f.description:(d.summary||"")});
+  if(p.pages)d.pages=+p.pages;if(p.cal)d.calId=p.cal;
+  const att=(p.att||"").split(",").filter(Boolean);
+  if(att.length&&!(d.attachments||[]).length)d.attachments=att.map((id,i)=>({name:`Anlage ${i+1}`,driveId:id}));
+  return d;
+}
 function driveMeta(d){
   const p={dk:d.id,v:"1",sender:d.sender,subject:d.subject,date:d.letterDate,ref:d.ref,refLabel:d.refLabel,amount:d.amount!=null?String(d.amount):"",
-    deadline:d.deadline,dlKind:d.deadlineKind,status:d.status,tags:(d.tags||[]).join(", "),note:d.note};
+    deadline:d.deadline,dlKind:d.deadlineKind,status:d.status,tags:(d.tags||[]).join(", "),note:d.note,cr:(d.createdAt||"").slice(0,10),
+    att:(d.attachments||[]).map(a=>a.driveId).filter(Boolean).join(","),cal:d.calId||"",pages:d.pages?String(d.pages):""};
   const appProperties={};for(const [k,v] of Object.entries(p))appProperties[k]=propFit(k,v);
   return {appProperties,description:String(d.summary||[d.sender,d.subject].filter(Boolean).join(" · ")).slice(0,4000)};
 }
@@ -140,7 +152,7 @@ async function readChanges(){
   if(!s.changesToken||!s.lastFull||Date.now()-Date.parse(s.lastFull)>864e5)return null;
   const files=[];let pt=s.changesToken,next=null;
   while(pt){
-    const r=await (await gfetch(`${CHANGES}?pageToken=${q(pt)}&pageSize=1000&includeRemoved=true&spaces=drive&fields=${q("nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,parents,trashed,mimeType))")}`)).json();
+    const r=await (await gfetch(`${CHANGES}?pageToken=${q(pt)}&pageSize=1000&includeRemoved=true&spaces=drive&fields=${q("nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,parents,trashed,mimeType,appProperties,description,webViewLink))")}`)).json();
     for(const c of r.changes||[])files.push(c.file&&!c.removed?c.file:{id:c.fileId,trashed:true});
     pt=r.nextPageToken||null;if(r.newStartPageToken)next=r.newStartPageToken;
   }
@@ -151,13 +163,13 @@ async function adoptDriveState(map,changed){
   let files=[];
   if(changed){ // nur geänderte Dateien, die zu Briefen gehören
     const own=new Set([...map.values()].map(d=>d.driveId).filter(Boolean));
-    files=changed.filter(f=>own.has(f.id));if(!files.length)return;
+    files=changed.filter(f=>own.has(f.id)||(f.appProperties?.v==="1"&&f.appProperties?.dk));if(!files.length)return;
     await refreshCats();
   }else{
   await refreshCats();
   // Alle Dateien der App mit Ort und Papierkorb-Status (App-Feld v=1, seit Schritt 2 an jeder Datei)
   let pt="";
-  do{const r=await (await gfetch(`${API}?q=${q("appProperties has { key='v' and value='1' }")}&fields=nextPageToken,files(id,name,parents,trashed)&pageSize=1000${pt?"&pageToken="+q(pt):""}`)).json();
+  do{const r=await (await gfetch(`${API}?q=${q("appProperties has { key='v' and value='1' }")}&fields=nextPageToken,files(id,name,parents,trashed,appProperties,description,webViewLink)&pageSize=1000${pt?"&pageToken="+q(pt):""}`)).json();
     files.push(...(r.files||[]));pt=r.nextPageToken||""}while(pt);
   }
   if(!files.length)return;
@@ -170,7 +182,15 @@ async function adoptDriveState(map,changed){
     const qq=`mimeType='application/vnd.google-apps.folder' and trashed=false and (${cids.slice(i,i+40).map(id=>`'${id}' in parents`).join(" or ")})`;
     const r=await (await gfetch(`${API}?q=${q(qq)}&fields=files(id,parents)&pageSize=1000`)).json();
     for(const f of r.files||[])if(!catOf.has(f.id))catOf.set(f.id,catOf.get((f.parents||[]).find(p=>catOf.has(p))))}
-  const now=new Date().toISOString();let moved=0,gone=0;
+  const now=new Date().toISOString();let moved=0,gone=0,added=0;
+  const known=new Set([...map.values()].map(d=>d.driveId));
+  for(const f of files){const dk=f.appProperties?.dk;
+    if(f.trashed||!dk||known.has(f.id)||map.has(dk)||S.deleted[dk])continue;
+    const par=(f.parents||[])[0];
+    const d=metaFromDrive({...blankDoc(),id:dk,createdAt:(f.appProperties.cr||today())+"T00:00:00.000Z",driveId:f.id,name:f.name,folder:par,
+      url:f.webViewLink||`https://drive.google.com/file/d/${f.id}/view`,category:catOf.get(par)||""},f);
+    d.placeKey=placeKey(d);d.metaHash=hashStr(JSON.stringify(driveMeta(d)));d.updatedAt=now;
+    map.set(d.id,d);await dbPut("docs",d);added++;glog("Aus Drive wiederhergestellt: "+f.name)}
   for(const d of [...map.values()]){
     const f=d.driveId&&byId.get(d.driveId);if(!f)continue;
     if(f.trashed){ // in Drive gelöscht: aus der App nehmen (Datei bleibt im Drive-Papierkorb)
@@ -181,9 +201,13 @@ async function adoptDriveState(map,changed){
       d.folder=par;if(catOf.get(par))d.category=catOf.get(par);d.name=f.name;d.placeKey=placeKey(d);d.updatedAt=now;await dbPut("docs",d);moved++;
       glog("In Drive verschoben, übernommen: "+f.name+(catOf.get(par)?" -> "+catOf.get(par):""))}
     else if(f.name!==d.name&&!local){d.name=f.name;d.updatedAt=now;await dbPut("docs",d)}
+    // Angaben an der Datei wurden anderswo geändert und in der App nicht: übernehmen
+    if(f.appProperties?.v==="1"&&d.metaHash&&d.metaHash===hashStr(JSON.stringify(driveMeta(d)))){
+      const nd=metaFromDrive(structuredClone(d),f),h=hashStr(JSON.stringify(driveMeta(nd)));
+      if(h!==d.metaHash){Object.assign(d,nd);d.metaHash=h;d.updatedAt=now;await dbPut("docs",d);moved++}}
   }
   if(gone)await dbPut("meta",{key:"deleted",items:S.deleted});
-  if(moved||gone)toast([moved&&`${nBriefe(moved)} aus Drive übernommen`,gone&&`${nBriefe(gone)} in Drive gelöscht`].filter(Boolean).join(", "));
+  if(moved||gone||added)toast([moved&&`${nBriefe(moved)} aus Drive übernommen`,added&&`${nBriefe(added)} aus Drive wiederhergestellt`,gone&&`${nBriefe(gone)} in Drive gelöscht`].filter(Boolean).join(", "));
 }
 /* ---- Vorschaubilder: für Briefe ohne Vorschau einmalig aus Drive holen ---- */
 async function fillThumbs(){
@@ -416,11 +440,12 @@ async function syncNow(){
     S.docs=[...map.values()];
     await dbPut("meta",{key:"deleted",items:S.deleted});
     const data=exportData(),h=hashStr(JSON.stringify({...data,updatedAt:null}));
-    if(!S.settings.driveDataId||h!==S.settings.lastUpHash||!S.settings.driveDataMd5){
+    const th=hashStr(JSON.stringify(data.docs.map(d=>[d.id,d.text||""]).sort())),daily=!S.settings.lastIndexUp||Date.now()-Date.parse(S.settings.lastIndexUp)>864e5;
+    if(!S.settings.driveDataId||!S.settings.driveDataMd5||th!==S.settings.lastTextHash||(h!==S.settings.lastUpHash&&daily)){
       const blob=new Blob([JSON.stringify(data)],{type:"application/json"});
       const up=await uploadMultipart(S.settings.driveDataId?{}:{name:DATA_NAME,parents:[S.settings.driveAppId]},blob,S.settings.driveDataId);
       if(!S.settings.driveDataId)S.settings.driveDataId=up.id;
-      S.settings.driveDataMd5=up.md5Checksum||null;S.settings.lastUpHash=h;glog("Index gespeichert");
+      S.settings.driveDataMd5=up.md5Checksum||null;S.settings.lastUpHash=h;S.settings.lastTextHash=th;S.settings.lastIndexUp=new Date().toISOString();glog("Index-Sicherung gespeichert");
     }
     await dailySnapshot(data);
     if(ch)S.settings.changesToken=ch.next||S.settings.changesToken;
