@@ -937,7 +937,7 @@ function openSettings(){
         :"Nach dem Verbinden liegen alle Briefe als PDF im Drive-Ordner „Dokumente“."}</p>
       <p class="status" id="driveStatus" style="margin:0;font-weight:600"></p>
       <div class="btnrow">${s.driveLinked
-        ?`<button type="button" class="btn primary" data-act="sync">Jetzt abgleichen</button><button type="button" class="btn" data-act="unlink">Drive trennen</button>`
+        ?`<button type="button" class="btn primary" data-act="sync">Jetzt abgleichen</button><button type="button" class="btn" data-act="resort">Umsortier-Liste prüfen</button><button type="button" class="btn" data-act="unlink">Drive trennen</button>`
         :`<button type="button" class="btn primary" data-act="link">Mit Google Drive verbinden</button>`}</div>
       <details><summary class="status">Verlauf anzeigen</summary><pre class="status" style="white-space:pre-wrap;margin:6px 0 0;font-size:12px">${esc((()=>{try{return JSON.parse(localStorage.getItem("glog")||"[]").join("\n")}catch{return ""}})()||"Noch keine Einträge.")}</pre></details></div>
     <div class="sec"><h3>Fristen</h3>
@@ -964,7 +964,8 @@ function openSettings(){
       case "close":return closeSheet();
       case "link":closeSheet();return connectDrive();
       case "unlink":S.settings.driveLinked=false;G.token=null;try{localStorage.removeItem("gtok")}catch{};await dbPut("meta",{key:"settings",...S.settings});closeSheet();render();updateChip();return toast("Drive getrennt. Die Dateien bleiben in Drive.");
-      case "sync":if(!tokenValid()){closeSheet();return connectDrive(true)}await syncNow();return openSettings();
+      case "sync":if(!tokenValid()){closeSheet();return connectDrive(true)}await syncNow();if(S.edit?.mode==="settings")openSettings();return;
+      case "resort":if(!tokenValid()){closeSheet();return connectDrive(true)}closeSheet();G.resortAsked=false;await checkResort();if(!S.edit)toast("Keine Umsortier-Liste gefunden");return;
       case "import":collectSettings();S.settings.importMode=true;await saveSettings();closeSheet();if(fullScope()&&tokenValid())return runImport();return connectDrive(false);
       case "calon":collectSettings();S.settings.calOn=true;await saveSettings();closeSheet();return connectDrive(false);
       case "caloff":collectSettings();S.settings.calOn=false;await saveSettings();return openSettings();
@@ -1366,7 +1367,13 @@ if(AUTH?.token){G.token=AUTH.token;G.exp=Date.now()+AUTH.expires*1000;try{localS
 const hasDriveFull=()=>{try{return /auth\/drive(\s|$)/.test(localStorage.getItem("gscope")||"")}catch{return false}};
 const fullScope=()=>{try{return /auth\/drive(\s|$)/.test(localStorage.getItem("gscope")||"")&&/gmail\.readonly/.test(localStorage.getItem("gscope")||"")}catch{return false}};
 async function gfetch(url,opts={}){
-  const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:"Bearer "+G.token}});
+  // Bis zu 3 Versuche: „Failed to fetch“ (kurz kein Netz, Drosselung ohne CORS-Kopf), 429, 5xx und 403 wegen Rate-Limit
+  let r;for(let k=0;;k++){
+    try{r=await fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:"Bearer "+G.token}})}
+    catch(e){if(k<2){await new Promise(z=>setTimeout(z,1500*(k+1)**2));continue}throw e}
+    if(k<2&&(r.status===429||r.status>=500||(r.status===403&&/rate ?limit/i.test(await r.clone().text().catch(()=>"")))))
+      {await new Promise(z=>setTimeout(z,1500*(k+1)**2));continue}
+    break}
   if(r.status===401){G.token=null;try{localStorage.removeItem("gtok")}catch{};const e=new Error("auth");e.code="auth";throw e}
   if(!r.ok){let t="";try{t=(await r.text()).replace(/\s+/g," ").slice(0,160)}catch{}
     glog("Google-Fehler "+r.status+": "+t);const e=new Error("google "+r.status);e.code=r.status===404||r.status===410?"gone":r.status===403?"forbidden":"fail";throw e}
@@ -1583,7 +1590,7 @@ async function syncNow(){
       if(d.driveId)for(const [i,a] of (d.attachments||[]).entries()){
         const an=name.replace(/\.pdf$/,`_Anlage-${i+1}.pdf`);if(!a.driveId||(a.folder===target&&a.dname===an))continue;
         try{await moveFile(a.driveId,target,an);a.folder=target;a.dname=an;d.updatedAt=new Date().toISOString()}
-        catch(e){if(e.code==="auth")throw e;if(e.code==="gone"){a.folder=target;a.dname=an}glog("Anlage nicht verschiebbar: "+(a.name||a.driveId))}
+        catch(e){if(e.code==="auth")throw e;if(e.code==="gone"){a.folder=target;a.dname=an}glog("Anlage nicht verschiebbar ("+(e.code||e.message)+"): "+(a.name||a.driveId))}
       }
     }
     await calSync(map);
@@ -1610,6 +1617,7 @@ async function syncNow(){
     await dailySnapshot(data);
     await dbPut("meta",{key:"settings",...S.settings});
     try{await refreshCats();await listInbox()}catch(e){if(e.code==="auth")throw e;glog("Eingang/Kategorien nicht lesbar: "+(e?.message||e))}
+    checkResort();
     G.last=new Date();glog("Abgleich erfolgreich ("+S.docs.length+" Dokumente)");
   }catch(e){G.err=e.code==="auth"?"auth":"fail";G.dirty=true;glog("Abgleich fehlgeschlagen: "+(e?.message||e))}
   finally{G.busy=false;updateChip();render()}
@@ -1734,11 +1742,13 @@ async function runImport(){
 /* ================= Umsortieren per Liste (dokumente-umsortieren.json, von Claude) ================= */
 const RESORT_NAME="dokumente-umsortieren.json";
 async function checkResort(){
-  if(G.resortAsked||!tokenValid()||!hasDriveFull()||S.edit)return;G.resortAsked=true;
+  if(G.resortAsked||G.resortBusy||!tokenValid()||!hasDriveFull()||S.edit||G.importing)return;G.resortBusy=true;
   let fileId,data;
   try{const r=await (await gfetch(`${API}?q=${q(`name='${RESORT_NAME}' and trashed=false`)}&fields=files(id)`)).json();
     fileId=r.files?.[0]?.id;if(!fileId)return;data=await (await gfetch(`${API}/${fileId}?alt=media`)).json()}
   catch(e){glog("Umsortier-Liste nicht lesbar: "+(e?.message||e));return}
+  finally{G.resortBusy=false}
+  G.resortAsked=true;if(S.edit)return void(G.resortAsked=false);
   const byDrive=new Map(live().filter(d=>d.driveId).map(d=>[d.driveId,d]));
   const moves=(data.moves||[]).map(m=>({d:byDrive.get(m.driveId),c:String(m.category||"").trim()})).filter(m=>m.d&&m.c&&m.d.category!==m.c);
   const tids=[...new Set(data.trash||[])],trash=tids.map(id=>byDrive.get(id)).filter(Boolean);
@@ -1791,7 +1801,7 @@ async function checkResort(){
     toast(AUTH.error==="access_denied"?"Anmeldung abgebrochen":"Anmeldung bei Google fehlgeschlagen ("+AUTH.error+")");
   }
   if(AUTH?.token)toast(S.settings.calOn?"Mit Google Drive und Kalender verbunden":"Mit Google Drive verbunden");
-  if(S.settings.driveLinked&&tokenValid())syncNow().then(()=>{if(S.settings.importMode&&fullScope())runImport();else checkResort()});
+  if(S.settings.driveLinked&&tokenValid())syncNow().then(()=>{if(S.settings.importMode&&fullScope())runImport()});
   if(S.settings.importMode&&AUTH?.token&&!fullScope()){toast("Für den Import bitte Drive- und Gmail-Zugriff erlauben");glog("Import: Zugriff nicht vollständig erlaubt")}
   document.addEventListener("visibilitychange",async()=>{
     if(document.visibilityState!=="visible")return;
