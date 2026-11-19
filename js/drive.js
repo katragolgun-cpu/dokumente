@@ -10,7 +10,7 @@ const GMAIL="https://gmail.googleapis.com/gmail/v1/users/me";
 const API="https://www.googleapis.com/drive/v3/files",UPLOAD="https://www.googleapis.com/upload/drive/v3/files",CAL="https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente",INBOX_NAME="0 Eingang",NOCAT=new Set([INBOX_NAME,"Eingang","_App-Daten"]);
 const G={token:null,exp:0,busy:false,dirty:false,last:null,err:null,timer:null,calErr:false};
-const LOCAL_KEYS=["driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
+const LOCAL_KEYS=["metaBackup","driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
 try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()){G.token=t.token;G.exp=t.exp}}catch{}
 const tokenValid=()=>!!G.token&&Date.now()<G.exp-60000;
 const REDIRECT_URI=new URL("./",location.href).href;
@@ -101,6 +101,35 @@ async function uploadMultipart(meta,blob,fileId){
 }
 // Schneller Prüfwert (FNV-1a), um unveränderte Index-Daten nicht erneut hochzuladen
 function hashStr(t){let h=2166136261;for(let i=0;i<t.length;i++){h^=t.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0).toString(36)+"."+t.length}
+/* ---- Angaben direkt an der Datei in Drive (Umbau Schritt 2): versteckte App-Felder + Kurzinfo als Beschreibung ---- */
+// Drive erlaubt je Feld höchstens 124 Bytes für Name und Wert zusammen
+function propFit(k,v){v=String(v??"");const enc=new TextEncoder();while(v&&enc.encode(k+v).length>124)v=v.slice(0,-1);return v}
+function driveMeta(d){
+  const p={dk:d.id,v:"1",sender:d.sender,subject:d.subject,date:d.letterDate,ref:d.ref,refLabel:d.refLabel,amount:d.amount!=null?String(d.amount):"",
+    deadline:d.deadline,dlKind:d.deadlineKind,status:d.status,tags:(d.tags||[]).join(", "),note:d.note};
+  const appProperties={};for(const [k,v] of Object.entries(p))appProperties[k]=propFit(k,v);
+  return {appProperties,description:String(d.summary||[d.sender,d.subject].filter(Boolean).join(" · ")).slice(0,4000)};
+}
+async function writeDriveMeta(map){
+  const todo=[...map.values()].filter(d=>d.driveId&&d.metaHash!==hashStr(JSON.stringify(driveMeta(d))));
+  if(!todo.length)return;
+  // Vor dem ersten Schreiben einmal eine vollständige Sicherung ablegen
+  if(!S.settings.metaBackup){
+    if(!S.settings.driveSnapId)S.settings.driveSnapId=await findOrCreateFolder("Sicherungen",S.settings.driveAppId);
+    await uploadMultipart({name:`Sicherung_vor-Drive-Angaben_${today()}.json`,parents:[S.settings.driveSnapId]},new Blob([JSON.stringify(exportData())],{type:"application/json"}));
+    S.settings.metaBackup=today();await dbPut("meta",{key:"settings",...S.settings});glog("Sicherung vor Drive-Angaben erstellt");
+  }
+  let n=0;const show=todo.length>5;
+  for(const d of todo){
+    if(show&&typeof importStatus==="function")importStatus(`Angaben in Drive speichern: ${++n} von ${todo.length}`);
+    const m=driveMeta(d);
+    try{await gfetch(`${API}/${d.driveId}?fields=id`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(m)});
+      d.metaHash=hashStr(JSON.stringify(m));await dbPut("docs",d)}
+    catch(e){if(e.code==="auth")throw e;if(e.code==="gone"){d.metaHash=hashStr(JSON.stringify(m));continue}glog("Angaben nicht gespeichert ("+(e.code||e.message)+"): "+(d.name||d.driveId))}
+  }
+  if(show&&typeof importStatus==="function")importStatus("");
+  if(show)glog(`Angaben an ${n} Dateien in Drive gespeichert`);
+}
 function stripLocal(d){const c=structuredClone(d);delete c.fileId;delete c.thumbId;return c}
 function scheduleSync(){if(!S.settings.driveLinked)return;G.dirty=true;updateChip();clearTimeout(G.timer);G.timer=setTimeout(syncNow,1500)}
 
@@ -281,6 +310,7 @@ async function syncNow(){
         catch(e){if(e.code==="auth")throw e;if(e.code==="gone"){a.folder=target;a.dname=an}glog("Anlage nicht verschiebbar ("+(e.code||e.message)+"): "+(a.name||a.driveId))}
       }
     }
+    await writeDriveMeta(map);
     await calSync(map);
     // Gelöschte: Dateien in den Papierkorb, Termine entfernen
     for(const t of [...S.trash]){

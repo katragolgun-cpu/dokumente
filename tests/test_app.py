@@ -40,7 +40,11 @@ class FakeDrive:
         if "upload/drive" in u:
             fid = re.search(r"/files/([^?]+)", u)
             fid = fid.group(1) if fid else self.new_id()
-            md5 = "md5-" + str(len(self.calls)); self.files.setdefault(fid, {"id": fid, "name": "upload", "parents": []})["md5"] = md5
+            md5 = "md5-" + str(len(self.calls)); f = self.files.setdefault(fid, {"id": fid, "name": "upload", "parents": []}); f["md5"] = md5
+            try:
+                nm = re.search(r'"name":"([^"]+)"', req.post_data_buffer.decode("utf-8", "ignore"))
+                if nm: f["name"] = nm.group(1)
+            except Exception: pass
             return route.fulfill(json={"id": fid, "webViewLink": "https://drive/" + fid, "md5Checksum": md5})
         mid = re.search(r"/drive/v3/files/([^/?]+)", u)
         if m == "GET" and mid and "fields=md5Checksum" in u:
@@ -71,6 +75,8 @@ class FakeDrive:
             body = json.loads(req.post_data or "{}")
             if body.get("name"): f["name"] = body["name"]
             if body.get("trashed"): f["trashed"] = True
+            if "appProperties" in body: f["appProperties"] = body["appProperties"]
+            if "description" in body: f["description"] = body["description"]
             a = re.search(r"addParents=([^&]+)", u); r_ = re.search(r"removeParents=([^&]+)", u)
             if a: f["parents"] = [p for p in f.get("parents", []) if not (r_ and p in r_.group(1).split(","))] + [a.group(1)]
             return route.fulfill(json={"id": f["id"], "webViewLink": "https://drive/" + f["id"]})
@@ -181,10 +187,30 @@ def test_umsortieren(p):
     check(not errs, "keine JavaScript-Fehler " + str(errs))
     b.close()
 
+def test_angaben_in_drive(p):
+    print("Angaben direkt an den Dateien in Drive")
+    docs = [doc(1, tags=["Steuer", "Bescheid"], summary="Kurzinfo eins", deadline="2026-12-01", deadlineKind="Zahlung", status="todo", amount=12.5),
+            doc(2, sender="Ä" * 90)]
+    files = FOLDERS + [{"id": "SNAP", "name": "Sicherungen", "mimeType": "folder", "parents": ["APP"]}] + [{"id": x["driveId"], "name": x["name"], "parents": ["C_AUTO24"]} for x in docs]
+    dr = FakeDrive(files); b, pg, errs = run(p, dr, docs)
+    pg.wait_for_timeout(1500)
+    a = dr.files["D1"].get("appProperties", {})
+    check(a.get("sender") == "Absender 1" and a.get("deadline") == "2026-12-01" and a.get("status") == "todo" and a.get("tags") == "Steuer, Bescheid" and a.get("dk") == "d1", "App-Felder an Datei 1")
+    check(dr.files["D1"].get("description") == "Kurzinfo eins", "Kurzinfo als Beschreibung")
+    s2 = dr.files["D2"].get("appProperties", {}).get("sender", "")
+    check(0 < len(("sender" + s2).encode()) <= 124, "langer Absender auf 124 Bytes gekürzt")
+    check(any((x.get("name") or "").startswith("Sicherung_vor-Drive-Angaben_") for x in dr.files.values()), "Sicherung vor dem ersten Schreiben")
+    dr.calls.clear(); pg.evaluate("syncNow()"); pg.wait_for_timeout(2000)
+    check(not any(c.startswith("PATCH") and "/D1?fields=id" in c for c in dr.calls), "zweiter Abgleich schreibt nichts erneut")
+    pg.evaluate("(async()=>{const d=S.docs.find(x=>x.id==='d1');d.status='erledigt';d.updatedAt=new Date().toISOString();await dbPut('docs',d);await syncNow()})()"); pg.wait_for_timeout(2500)
+    check(dr.files["D1"]["appProperties"]["status"] == "erledigt", "Änderung landet in Drive")
+    check(not errs, "keine JavaScript-Fehler " + str(errs))
+    b.close()
+
 if __name__ == "__main__":
     srv = serve()
     with sync_playwright() as p:
-        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren]:
+        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive]:
             try: t(p)
             except Exception as e: check(False, t.__name__ + ": " + repr(e)[:200])
     srv.shutdown()
