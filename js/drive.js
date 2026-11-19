@@ -10,7 +10,7 @@ const GMAIL="https://gmail.googleapis.com/gmail/v1/users/me";
 const API="https://www.googleapis.com/drive/v3/files",UPLOAD="https://www.googleapis.com/upload/drive/v3/files",CAL="https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const DATA_NAME="dokumente-daten.json",FOLDER_NAME="Dokumente",INBOX_NAME="0 Eingang",NOCAT=new Set([INBOX_NAME,"Eingang","_App-Daten"]);
 const G={token:null,exp:0,busy:false,dirty:false,last:null,err:null,timer:null,calErr:false};
-const LOCAL_KEYS=["metaBackup","driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
+const LOCAL_KEYS=["changesToken","lastFull","metaBackup","driveDataMd5","lastUpHash","driveInboxId","driveLinked","lastBackup","driveFolderId","driveDataId","driveAppId","driveFolderMap","driveSnapId","lastSnapshot","calOn","importMode","lastImport"];
 try{const t=JSON.parse(localStorage.getItem("gtok")||"null");if(t&&t.exp>Date.now()){G.token=t.token;G.exp=t.exp}}catch{}
 const tokenValid=()=>!!G.token&&Date.now()<G.exp-60000;
 const REDIRECT_URI=new URL("./",location.href).href;
@@ -133,13 +133,33 @@ async function writeDriveMeta(map){
 /* ---- Umbau Schritt 3: Ort in Drive übernehmen ---- */
 // Wo die App den Brief haben will; ändert sich nur durch Änderungen in der App (Kategorie, Datum, Absender, Betreff)
 const placeKey=d=>[folderName(d.category),docDate(d).slice(0,4),fileName(d)].join("/");
-async function adoptDriveState(map){
+// Änderungen seit dem letzten Abgleich (null = vollständiger Abgleich nötig)
+const CHANGES="https://www.googleapis.com/drive/v3/changes";
+async function readChanges(){
+  const s=S.settings;
+  if(!s.changesToken||!s.lastFull||Date.now()-Date.parse(s.lastFull)>864e5)return null;
+  const files=[];let pt=s.changesToken,next=null;
+  while(pt){
+    const r=await (await gfetch(`${CHANGES}?pageToken=${q(pt)}&pageSize=1000&includeRemoved=true&spaces=drive&fields=${q("nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,parents,trashed,mimeType))")}`)).json();
+    for(const c of r.changes||[])files.push(c.file&&!c.removed?c.file:{id:c.fileId,trashed:true});
+    pt=r.nextPageToken||null;if(r.newStartPageToken)next=r.newStartPageToken;
+  }
+  return {files,next};
+}
+async function adoptDriveState(map,changed){
   const s=S.settings;if(!hasDriveFull()||!s.driveFolderId)return;
+  let files=[];
+  if(changed){ // nur geänderte Dateien, die zu Briefen gehören
+    const own=new Set([...map.values()].map(d=>d.driveId).filter(Boolean));
+    files=changed.filter(f=>own.has(f.id));if(!files.length)return;
+    await refreshCats();
+  }else{
   await refreshCats();
   // Alle Dateien der App mit Ort und Papierkorb-Status (App-Feld v=1, seit Schritt 2 an jeder Datei)
-  const files=[];let pt="";
+  let pt="";
   do{const r=await (await gfetch(`${API}?q=${q("appProperties has { key='v' and value='1' }")}&fields=nextPageToken,files(id,name,parents,trashed)&pageSize=1000${pt?"&pageToken="+q(pt):""}`)).json();
     files.push(...(r.files||[]));pt=r.nextPageToken||""}while(pt);
+  }
   if(!files.length)return;
   const byId=new Map(files.map(f=>[f.id,f]));
   // Ordner -> Kategorie: Kategorie-Ordner selbst und ihre Unterordner (Jahre)
@@ -328,8 +348,13 @@ async function syncNow(){
   G.busy=true;G.dirty=false;G.err=null;updateChip();
   try{
     await ensureFolders();
+    // Umbau Schritt 4: nur lesen, was sich in Drive geändert hat; einmal am Tag vollständig
+    let ch=null,startTok=null;
+    if(hasDriveFull()){try{ch=await readChanges()}catch(e){if(e.code==="auth")throw e;ch=null;glog("Änderungsliste nicht lesbar, vollständiger Abgleich")}
+      if(!ch)try{startTok=(await (await gfetch(`${CHANGES}/startPageToken`)).json()).startPageToken}catch(e){if(e.code==="auth")throw e}}
+    const chIds=new Set(ch?.files.map(f=>f.id)||[]);
     let remote=null;
-    if(S.settings.driveDataId){
+    if(S.settings.driveDataId&&(!ch||chIds.has(S.settings.driveDataId))){
       try{const meta=await (await gfetch(`${API}/${S.settings.driveDataId}?fields=md5Checksum,trashed`)).json();
         if(meta.trashed){const e=new Error("gone");e.code="gone";throw e}
         // Unverändert seit unserem letzten Hochladen: Inhalt ist schon eingearbeitet
@@ -345,7 +370,7 @@ async function syncNow(){
     }
     for(const [id,t] of Object.entries(S.deleted)){const d=map.get(id);if(d&&t>=(d.updatedAt||"")){map.delete(id);if(d.driveId&&!S.trash.some(x=>x.id===d.driveId))S.trash.push({kind:"file",id:d.driveId})}}
     // Was in Drive verschoben, umbenannt oder gelöscht wurde, übernehmen (Drive ist die Wahrheit)
-    await adoptDriveState(map);
+    await adoptDriveState(map,ch?ch.files:null);
     // PDFs hochladen bzw. dorthin verschieben, wo die App sie haben will – nur nach Änderungen in der App
     for(const d of map.values()){
       const pk=placeKey(d);
@@ -398,10 +423,15 @@ async function syncNow(){
       S.settings.driveDataMd5=up.md5Checksum||null;S.settings.lastUpHash=h;glog("Index gespeichert");
     }
     await dailySnapshot(data);
+    if(ch)S.settings.changesToken=ch.next||S.settings.changesToken;
+    else if(startTok){S.settings.changesToken=startTok;S.settings.lastFull=new Date().toISOString()}
     await dbPut("meta",{key:"settings",...S.settings});
-    try{await refreshCats();await listInbox()}catch(e){if(e.code==="auth")throw e;glog("Eingang/Kategorien nicht lesbar: "+(e?.message||e))}
+    const s=S.settings,inbIds=new Set(S.inbox.map(f=>f.id));
+    const folderCh=!ch||ch.files.some(f=>f.mimeType==="application/vnd.google-apps.folder");
+    const inboxCh=!ch||!G.inboxLoaded||ch.files.some(f=>inbIds.has(f.id)||(f.parents||[]).includes(s.driveInboxId));
+    try{if(folderCh)await refreshCats();if(inboxCh){await listInbox();G.inboxLoaded=true}}catch(e){if(e.code==="auth")throw e;glog("Eingang/Kategorien nicht lesbar: "+(e?.message||e))}
     setTimeout(fillThumbs,500);
-    checkResort();
+    if(!ch||!G.resortChecked||ch.files.some(f=>/^dokumente-umsortieren/.test(f.name||""))){G.resortChecked=true;checkResort()}
     G.last=new Date();glog("Abgleich erfolgreich ("+S.docs.length+" Dokumente)");
   }catch(e){G.err=e.code==="auth"?"auth":"fail";G.dirty=true;glog("Abgleich fehlgeschlagen: "+(e?.message||e))}
   finally{G.busy=false;updateChip();render()}

@@ -29,7 +29,8 @@ class FakeDrive:
     """Sehr einfache Nachbildung der Drive-API: Ordner und Dateien im Speicher."""
     def __init__(self, files=None, extra=None):
         self.files = {f["id"]: f for f in (files or [])}
-        self.calls = []; self.n = 0; self.extra = extra or (lambda route, m, u, uq: None)
+        self.calls = []; self.n = 0; self.extra = extra or (lambda route, m, u, uq: None); self.log = []
+    def touch(self, fid): self.log.append(fid)  # Änderung für die Drive-Änderungsliste merken
     def new_id(self): self.n += 1; return "N%d" % self.n
     def __call__(self, route):
         req = route.request; u = req.url; m = req.method; uq = unquote(u)
@@ -37,9 +38,15 @@ class FakeDrive:
         if "cdn.jsdelivr" in u: return route.abort()
         r = self.extra(route, m, u, uq)
         if r is not None: return r
+        if "/drive/v3/changes/startPageToken" in u: return route.fulfill(json={"startPageToken": str(len(self.log))})
+        if "/drive/v3/changes?" in u:
+            t = int(re.search(r"pageToken=(\d+)", u).group(1)); ids = list(dict.fromkeys(self.log[t:]))
+            ch = [{"fileId": i, "file": {k: v for k, v in self.files[i].items() if k in ("id", "name", "parents", "trashed", "mimeType")}} if i in self.files else {"fileId": i, "removed": True} for i in ids]
+            return route.fulfill(json={"changes": ch, "newStartPageToken": str(len(self.log))})
         if "upload/drive" in u:
             fid = re.search(r"/files/([^?]+)", u)
             fid = fid.group(1) if fid else self.new_id()
+            self.touch(fid)
             md5 = "md5-" + str(len(self.calls)); f = self.files.setdefault(fid, {"id": fid, "name": "upload", "parents": []}); f["md5"] = md5
             try:
                 nm = re.search(r'"name":"([^"]+)"', req.post_data_buffer.decode("utf-8", "ignore"))
@@ -73,11 +80,11 @@ class FakeDrive:
             if "trashed=false" in q: res = [f for f in res if not f.get("trashed")]
             return route.fulfill(json={"files": [{k: v for k, v in f.items() if k != "content"} for f in res]})
         if m == "POST" and "/drive/v3/files" in u:
-            body = json.loads(req.post_data or "{}"); fid = self.new_id()
+            body = json.loads(req.post_data or "{}"); fid = self.new_id(); self.touch(fid)
             self.files[fid] = {"id": fid, "name": body.get("name"), "parents": body.get("parents", []), "mimeType": "folder" if "folder" in body.get("mimeType", "") else "x"}
             return route.fulfill(json={"id": fid})
         if m == "PATCH" and mid:
-            f = self.files.setdefault(mid.group(1), {"id": mid.group(1), "parents": []})
+            f = self.files.setdefault(mid.group(1), {"id": mid.group(1), "parents": []}); self.touch(f["id"])
             body = json.loads(req.post_data or "{}")
             if body.get("name"): f["name"] = body["name"]
             if body.get("trashed"): f["trashed"] = True
@@ -223,6 +230,7 @@ def test_drive_ist_wahrheit(p):
     check(all((dr.files["D%d" % i].get("appProperties") or {}).get("v") == "1" for i in (1, 2, 3)), "Vorbereitung: App-Felder geschrieben")
     # Olgun verschiebt in Drive D1 nach Steuern/2024, benennt D2 um und löscht D3
     dr.files["D1"]["parents"] = ["C_STEU24"]; dr.files["D2"]["name"] = "Mein Name.pdf"; dr.files["D3"]["trashed"] = True
+    for i in ("D1", "D2", "D3"): dr.touch(i)
     dr.calls.clear(); pg.evaluate("syncNow()"); pg.wait_for_timeout(3000)
     check(pg.evaluate("S.docs.find(d=>d.id==='d1')?.category") == "Steuern", "Verschiebung übernommen: Kategorie Steuern")
     check(dr.files["D1"]["parents"] == ["C_STEU24"], "Datei bleibt, wo Olgun sie hingelegt hat")
@@ -271,10 +279,34 @@ def test_vorschau_und_karten(p):
     check(not errs, "keine JavaScript-Fehler " + str(errs))
     b.close()
 
+def test_abgleich_ueber_aenderungen(p):
+    print("Abgleich über die Drive-Änderungsliste")
+    docs = [doc(i) for i in range(5)]
+    files = FOLDERS + [{"id": x["driveId"], "name": x["name"], "parents": ["C_AUTO24"]} for x in docs]
+    dr = FakeDrive(files); b, pg, errs = run(p, dr, docs)
+    pg.wait_for_timeout(1500); pg.evaluate("syncNow()"); pg.wait_for_timeout(2000)
+    check(bool(pg.evaluate("S.settings.changesToken")), "Änderungsmarke gespeichert")
+    dr.calls.clear(); pg.evaluate("syncNow()"); pg.wait_for_timeout(2000)
+    other = [c for c in dr.calls if "/drive/v3/changes" not in c]
+    check(len(other) == 0, "ohne Änderungen nur 1 Zugriff (sonst: %s)" % other[:3])
+    # neuer Scan im Eingang wird über die Änderungsliste erkannt
+    dr.files["NEU"] = {"id": "NEU", "name": "Scan.pdf", "parents": ["INB"], "mimeType": "application/pdf"}; dr.touch("NEU")
+    pg.evaluate("syncNow()"); pg.wait_for_timeout(2000)
+    check(pg.evaluate("S.inbox.some(f=>f.id==='NEU')"), "neuer Scan im Eingang erkannt")
+    # Verschieben in Drive über die Änderungsliste
+    dr.files["D1"]["parents"] = ["C_STEU"]; dr.touch("D1")
+    pg.evaluate("syncNow()"); pg.wait_for_timeout(2000)
+    check(pg.evaluate("S.docs.find(d=>d.id==='d1').category") == "Steuern", "Verschiebung über Änderungsliste übernommen")
+    # nach 24 Stunden wieder vollständig
+    pg.evaluate("S.settings.lastFull='2000-01-01T00:00:00Z'"); dr.calls.clear(); pg.evaluate("syncNow()"); pg.wait_for_timeout(2000)
+    check(any("startPageToken" in c for c in dr.calls), "einmal am Tag vollständiger Abgleich")
+    check(not errs, "keine JavaScript-Fehler " + str(errs))
+    b.close()
+
 if __name__ == "__main__":
     srv = serve()
     with sync_playwright() as p:
-        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen, test_vorschau_und_karten]:
+        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit, test_einstellungen, test_vorschau_und_karten, test_abgleich_ueber_aenderungen]:
             try: t(p)
             except Exception as e: check(False, t.__name__ + ": " + repr(e)[:200])
     srv.shutdown()
