@@ -58,13 +58,14 @@ class FakeDrive:
         if m == "GET" and "/drive/v3/files?" in u:
             q = re.search(r"q=([^&]*)", uq); q = q.group(1) if q else ""
             res = list(self.files.values())
-            p = re.search(r"'([^']+)' in parents", q)
-            if p: res = [f for f in res if p.group(1) in f.get("parents", [])]
+            if "appProperties has" in q: res = [f for f in res if (f.get("appProperties") or {}).get("v") == "1"]
+            ps = re.findall(r"'([^']+)' in parents", q)
+            if ps: res = [f for f in res if any(x in f.get("parents", []) for x in ps)]
             n = re.search(r"name='([^']*)'", q)
             if n: res = [f for f in res if f["name"] == n.group(1)]
             if "mimeType='application/vnd.google-apps.folder'" in q: res = [f for f in res if f.get("mimeType") == "folder"]
             if "mimeType='application/pdf'" in q: res = [f for f in res if f.get("mimeType") == "application/pdf"]
-            res = [f for f in res if not f.get("trashed")]
+            if "trashed=false" in q: res = [f for f in res if not f.get("trashed")]
             return route.fulfill(json={"files": [{k: v for k, v in f.items() if k != "content"} for f in res]})
         if m == "POST" and "/drive/v3/files" in u:
             body = json.loads(req.post_data or "{}"); fid = self.new_id()
@@ -207,10 +208,33 @@ def test_angaben_in_drive(p):
     check(not errs, "keine JavaScript-Fehler " + str(errs))
     b.close()
 
+def test_drive_ist_wahrheit(p):
+    print("Verschieben und Löschen in Drive wird übernommen")
+    docs = [doc(1), doc(2), doc(3)]
+    files = FOLDERS + [{"id": "C_STEU24", "name": "2024", "mimeType": "folder", "parents": ["C_STEU"]}] + \
+            [{"id": x["driveId"], "name": x["name"], "parents": ["C_AUTO24"]} for x in docs]
+    dr = FakeDrive(files); b, pg, errs = run(p, dr, docs)
+    pg.wait_for_timeout(1500)
+    check(all((dr.files["D%d" % i].get("appProperties") or {}).get("v") == "1" for i in (1, 2, 3)), "Vorbereitung: App-Felder geschrieben")
+    # Olgun verschiebt in Drive D1 nach Steuern/2024, benennt D2 um und löscht D3
+    dr.files["D1"]["parents"] = ["C_STEU24"]; dr.files["D2"]["name"] = "Mein Name.pdf"; dr.files["D3"]["trashed"] = True
+    dr.calls.clear(); pg.evaluate("syncNow()"); pg.wait_for_timeout(3000)
+    check(pg.evaluate("S.docs.find(d=>d.id==='d1')?.category") == "Steuern", "Verschiebung übernommen: Kategorie Steuern")
+    check(dr.files["D1"]["parents"] == ["C_STEU24"], "Datei bleibt, wo Olgun sie hingelegt hat")
+    check(dr.files["D2"]["name"] == "Mein Name.pdf", "Umbenennung in Drive bleibt")
+    check(pg.evaluate("S.docs.some(d=>d.id==='d3')") is False, "in Drive gelöschter Brief aus der App entfernt")
+    dr.calls.clear(); pg.evaluate("syncNow()"); pg.wait_for_timeout(2000)
+    check(not any(c.startswith("PATCH") and "addParents" in c for c in dr.calls), "kein Zurückschieben beim nächsten Abgleich")
+    # Änderung in der App verschiebt weiterhin
+    pg.evaluate("(async()=>{const d=S.docs.find(x=>x.id==='d2');d.category='Steuern';d.updatedAt=new Date().toISOString();await dbPut('docs',d);await syncNow()})()"); pg.wait_for_timeout(3000)
+    check(dr.files["D2"]["parents"] == ["C_STEU24"], "Kategorie-Änderung in der App verschiebt die Datei")
+    check(not errs, "keine JavaScript-Fehler " + str(errs))
+    b.close()
+
 if __name__ == "__main__":
     srv = serve()
     with sync_playwright() as p:
-        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive]:
+        for t in [test_start_und_abgleich, test_eingang_und_speichern, test_doppelt, test_bekannte_datei_im_eingang, test_umsortieren, test_angaben_in_drive, test_drive_ist_wahrheit]:
             try: t(p)
             except Exception as e: check(False, t.__name__ + ": " + repr(e)[:200])
     srv.shutdown()

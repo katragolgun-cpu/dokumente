@@ -1,5 +1,5 @@
 // Offline-Unterstützung: App-Dateien und Texterkennung werden zwischengespeichert.
-const VERSION = "v21";
+const VERSION = "v22";
 const SHELL = "shell-" + VERSION;
 const RUNTIME = "runtime-" + VERSION;
 const FILES = ["./", "index.html", "parser.js", "js/basis.js", "js/bausteine.js", "js/erfassen.js", "js/einstellungen.js", "js/scanner.js", "js/drive.js", "js/import.js", "js/start.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];

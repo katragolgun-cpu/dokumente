@@ -130,6 +130,41 @@ async function writeDriveMeta(map){
   if(show&&typeof importStatus==="function")importStatus("");
   if(show)glog(`Angaben an ${n} Dateien in Drive gespeichert`);
 }
+/* ---- Umbau Schritt 3: Ort in Drive übernehmen ---- */
+// Wo die App den Brief haben will; ändert sich nur durch Änderungen in der App (Kategorie, Datum, Absender, Betreff)
+const placeKey=d=>[folderName(d.category),docDate(d).slice(0,4),fileName(d)].join("/");
+async function adoptDriveState(map){
+  const s=S.settings;if(!hasDriveFull()||!s.driveFolderId)return;
+  await refreshCats();
+  // Alle Dateien der App mit Ort und Papierkorb-Status (App-Feld v=1, seit Schritt 2 an jeder Datei)
+  const files=[];let pt="";
+  do{const r=await (await gfetch(`${API}?q=${q("appProperties has { key='v' and value='1' }")}&fields=nextPageToken,files(id,name,parents,trashed)&pageSize=1000${pt?"&pageToken="+q(pt):""}`)).json();
+    files.push(...(r.files||[]));pt=r.nextPageToken||""}while(pt);
+  if(!files.length)return;
+  const byId=new Map(files.map(f=>[f.id,f]));
+  // Ordner -> Kategorie: Kategorie-Ordner selbst und ihre Unterordner (Jahre)
+  const catOf=new Map();
+  for(const [k,id] of Object.entries(s.driveFolderMap||{})){const p=k.split("/").filter(Boolean);if(p.length===1)catOf.set(id,(s.categories.find(c=>folderName(c.name)===p[0])||{name:p[0]}).name)}
+  const cids=[...catOf.keys()];
+  for(let i=0;i<cids.length;i+=40){
+    const qq=`mimeType='application/vnd.google-apps.folder' and trashed=false and (${cids.slice(i,i+40).map(id=>`'${id}' in parents`).join(" or ")})`;
+    const r=await (await gfetch(`${API}?q=${q(qq)}&fields=files(id,parents)&pageSize=1000`)).json();
+    for(const f of r.files||[])if(!catOf.has(f.id))catOf.set(f.id,catOf.get((f.parents||[]).find(p=>catOf.has(p))))}
+  const now=new Date().toISOString();let moved=0,gone=0;
+  for(const d of [...map.values()]){
+    const f=d.driveId&&byId.get(d.driveId);if(!f)continue;
+    if(f.trashed){ // in Drive gelöscht: aus der App nehmen (Datei bleibt im Drive-Papierkorb)
+      S.deleted[d.id]=now;map.delete(d.id);await dbDel("docs",d.id);gone++;glog("In Drive gelöscht, aus der App entfernt: "+(d.name||d.id));continue}
+    const par=(f.parents||[])[0];if(!par||par===s.driveInboxId)continue;
+    const local=d.placeKey!==undefined&&d.placeKey!==placeKey(d); // in der App geändert, noch nicht verschoben: App gewinnt
+    if(par!==d.folder&&!local){
+      d.folder=par;if(catOf.get(par))d.category=catOf.get(par);d.name=f.name;d.placeKey=placeKey(d);d.updatedAt=now;await dbPut("docs",d);moved++;
+      glog("In Drive verschoben, übernommen: "+f.name+(catOf.get(par)?" -> "+catOf.get(par):""))}
+    else if(f.name!==d.name&&!local){d.name=f.name;d.updatedAt=now;await dbPut("docs",d)}
+  }
+  if(gone)await dbPut("meta",{key:"deleted",items:S.deleted});
+  if(moved||gone)toast([moved&&`${nBriefe(moved)} aus Drive übernommen`,gone&&`${nBriefe(gone)} in Drive gelöscht`].filter(Boolean).join(", "));
+}
 function stripLocal(d){const c=structuredClone(d);delete c.fileId;delete c.thumbId;return c}
 function scheduleSync(){if(!S.settings.driveLinked)return;G.dirty=true;updateChip();clearTimeout(G.timer);G.timer=setTimeout(syncNow,1500)}
 
@@ -216,7 +251,7 @@ async function openInbox(){
       if(b.dataset.act==="take"){const f=S.inbox.find(x=>x.id===b.dataset.id);if(f)takeInbox(f)}
       if(b.dataset.act==="back"){const f=S.inbox.find(x=>x.id===b.dataset.id),d=f&&S.docs.find(x=>x.id===f.known);if(!d)return;
         // Ordner als „Eingang“ merken: der nächste Abgleich verschiebt die Datei zurück nach Kategorie/Jahr
-        d.folder=S.settings.driveInboxId;d.updatedAt=new Date().toISOString();await dbPut("docs",d);
+        d.folder=S.settings.driveInboxId;d.placeKey=null;d.updatedAt=new Date().toISOString();await dbPut("docs",d);
         S.inbox=S.inbox.filter(x=>x.id!==f.id);updateInboxN();scheduleSync();toast("Wird zurück nach „"+(d.category||"")+"“ verschoben");draw("")}});
   };
   const load=async()=>{draw("Eingang wird gelesen …");
@@ -292,22 +327,32 @@ async function syncNow(){
       if(!l||(r.updatedAt||"")>(l.updatedAt||"")){const m=structuredClone(r);if(l){m.fileId=l.fileId;m.thumbId=l.thumbId}map.set(r.id,m)}
     }
     for(const [id,t] of Object.entries(S.deleted)){const d=map.get(id);if(d&&t>=(d.updatedAt||"")){map.delete(id);if(d.driveId&&!S.trash.some(x=>x.id===d.driveId))S.trash.push({kind:"file",id:d.driveId})}}
-    // PDFs hochladen bzw. in den richtigen Ordner verschieben und benennen
+    // Was in Drive verschoben, umbenannt oder gelöscht wurde, übernehmen (Drive ist die Wahrheit)
+    await adoptDriveState(map);
+    // PDFs hochladen bzw. dorthin verschieben, wo die App sie haben will – nur nach Änderungen in der App
     for(const d of map.values()){
-      const target=await wantedFolder(d),name=fileName(d);
+      const pk=placeKey(d);
       if(!d.driveId&&d.fileId){
         const f=await dbGet("files",d.fileId);if(!f)continue;
+        const target=await wantedFolder(d),name=fileName(d);
         const up=await uploadMultipart({name,parents:[target],description:[d.sender,d.subject,(d.tags||[]).join(", ")].filter(Boolean).join(" · ")},f.blob);
-        d.driveId=up.id;d.url=up.webViewLink||`https://drive.google.com/file/d/${up.id}/view`;d.folder=target;d.name=name;d.updatedAt=new Date().toISOString();
+        d.driveId=up.id;d.url=up.webViewLink||`https://drive.google.com/file/d/${up.id}/view`;d.folder=target;d.name=name;d.placeKey=pk;d.updatedAt=new Date().toISOString();
         await dbPut("docs",d);glog("Hochgeladen: "+name);
-      }else if(d.driveId&&(d.folder!==target||d.name!==name)){
-        try{await moveFile(d.driveId,target,name);d.folder=target;d.name=name;d.updatedAt=new Date().toISOString();await dbPut("docs",d)}
-        catch(e){if(e.code==="auth")throw e;glog("Verschieben nicht möglich: "+(d.name||d.driveId))}
+      }else if(d.driveId){
+        let place=d.placeKey!==pk;
+        if(d.placeKey===undefined){ // Altbestand: einmalig nach der bisherigen Regel prüfen
+          place=d.folder!==await wantedFolder(d)||d.name!==fileName(d);
+          if(!place){d.placeKey=pk;await dbPut("docs",d)}
+        }
+        if(place){const target=await wantedFolder(d),name=fileName(d);
+          try{await moveFile(d.driveId,target,name);d.folder=target;d.name=name;d.placeKey=pk;d.updatedAt=new Date().toISOString();await dbPut("docs",d)}
+          catch(e){if(e.code==="auth")throw e;glog("Verschieben nicht möglich: "+(d.name||d.driveId))}}
       }
-      if(d.driveId)for(const [i,a] of (d.attachments||[]).entries()){
-        const an=name.replace(/\.pdf$/,`_Anlage-${i+1}.pdf`);if(!a.driveId||(a.folder===target&&a.dname===an))continue;
-        try{await moveFile(a.driveId,target,an);a.folder=target;a.dname=an;d.updatedAt=new Date().toISOString();await dbPut("docs",d)}
-        catch(e){if(e.code==="auth")throw e;if(e.code==="gone"){a.folder=target;a.dname=an}glog("Anlage nicht verschiebbar ("+(e.code||e.message)+"): "+(a.name||a.driveId))}
+      // Anlagen folgen dem Hauptdokument, wo immer es liegt
+      if(d.driveId&&d.folder)for(const [i,a] of (d.attachments||[]).entries()){
+        const an=String(d.name||fileName(d)).replace(/(\.pdf)?$/i,`_Anlage-${i+1}.pdf`);if(!a.driveId||(a.folder===d.folder&&a.dname===an))continue;
+        try{await moveFile(a.driveId,d.folder,an);a.folder=d.folder;a.dname=an;d.updatedAt=new Date().toISOString();await dbPut("docs",d)}
+        catch(e){if(e.code==="auth")throw e;if(e.code==="gone"){a.folder=d.folder;a.dname=an}glog("Anlage nicht verschiebbar ("+(e.code||e.message)+"): "+(a.name||a.driveId))}
       }
     }
     await writeDriveMeta(map);
